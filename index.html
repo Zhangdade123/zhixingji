@@ -929,6 +929,7 @@ function migrate(d){
   const PM={serviceId:'service_qavkobd',templateId:'template_dpct7b4',publicKey:'rJuPzdo1L0fNNPsU_',to:''};
   if(!st.mail||typeof st.mail!=='object')st.mail=Object.assign({},PM);
   ['serviceId','templateId','publicKey'].forEach(k=>{if(!st.mail[k])st.mail[k]=PM[k];});
+  if(st.mail.publicKey==='vEp5AY66dc2Lx8xU')st.mail.publicKey=PM.publicKey; // 一次性纠正历史错误公钥
   if(typeof st.mail.to!=='string')st.mail.to='';
   const PA={key:'',model:'doubao-seed-2-1-pro-260628',base:'https://ark.cn-beijing.volces.com/api/v3/chat/completions'};
   if(!st.ai||typeof st.ai!=='object')st.ai=Object.assign({},PA);
@@ -1017,7 +1018,7 @@ function renderRoute(){
    六、通用渲染件：待办行 / 导航 / 底栏
    ============================================================ */
 function todoMenu(t){
-  return `<details class="mini-menu" data-stop>
+  return `<details class="mini-menu" data-stop data-mid="${t.id}">
     <summary title="更多操作">${I.more}</summary>
     <div class="mini-pop">
       <button data-act="postpone" data-id="${t.id}" data-day="0">设为今天</button>
@@ -2205,8 +2206,6 @@ document.addEventListener('input',e=>{
     ui.noteQuery=el.value;ui.groupPage={};renderNotes();
     const ni=$('#note-search');if(ni){ni.focus();ni.setSelectionRange(ni.value.length,ni.value.length);}
   }
-  if(d.act==='pick-date'){if(el.value){postpone(d.id,null,el.value);}}
-  if(d.act==='pick-time'){setTodoTime(d.id,el.value);}
   if(d.act==='todo-search'){
     ui.todoQuery=el.value;ui.groupPage={};renderTodos();
     const i=$('#todo-search-input');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}
@@ -2215,8 +2214,8 @@ document.addEventListener('input',e=>{
 document.addEventListener('change',e=>{
   const el=e.target,d=el.dataset;
   if(!d.act)return;
-  if(d.act==='pick-date'){if(el.value){postpone(d.id,null,el.value);}return;}
-  if(d.act==='pick-time'){setTodoTime(d.id,el.value);return;}
+  if(d.act==='pick-date'){if(el.value){postpone(d.id,null,el.value,true);}return;}
+  if(d.act==='pick-time'){setTodoTime(d.id,el.value,true);return;}
   if(d.act==='todo-sort'){ui.todoSort=el.value;ui.groupPage={};renderTodos();}
   if(d.act==='sum-date'){
     ui.sumStart=$('#sum-start').value;ui.sumEnd=$('#sum-end').value;
@@ -2295,21 +2294,26 @@ function toggleTodo(id){
   if(t.done)ding();
   persist();rerenderCurrent();
 }
-function postpone(id,day,date){
+function reopenMiniMenu(id){ // 重绘后同步重新展开指定待办的快捷菜单（日期/时间连改时不收起）
+  const d=document.querySelector(`details.mini-menu[data-mid="${id}"]`);if(d)d.open=true;
+}
+function postpone(id,day,date,keep){
   const t=byId(id);if(!t)return;
   t.date=date!=null?date:addDays(T,day);
   persist();toast(`已改期到 ${relDay(t.date)}${t.time?' '+t.time:''}`);
-  document.querySelectorAll('details.mini-menu[open]').forEach(x=>x.open=false);
+  if(!keep)document.querySelectorAll('details.mini-menu[open]').forEach(x=>x.open=false);
   rerenderCurrent();
+  if(keep)reopenMiniMenu(id);
 }
-function setTodoTime(id,time){
+function setTodoTime(id,time,keep){
   const t=byId(id);if(!t)return;
   t.time=time||null;
   if(!t.date&&time)t.date=T; // 原本待安排、只设了时间时，默认排到今天
   persist();
-  document.querySelectorAll('details.mini-menu[open]').forEach(x=>x.open=false);
+  if(!keep)document.querySelectorAll('details.mini-menu[open]').forEach(x=>x.open=false);
   toast(time?`计划时间设为 ${relDay(t.date)} ${time}`:'已清除计划时间');
   rerenderCurrent();
+  if(keep)reopenMiniMenu(id);
 }
 /* 待安排批量设日期（尊重当前类型筛选与搜索） */
 function batchSchedule(day){
