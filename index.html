@@ -75,7 +75,8 @@ h1,h2,h3,h4{color:var(--ink);font-weight:600;line-height:1.35;}
   font-family:var(--serif);font-size:13.5px;letter-spacing:3px;border:1px solid rgba(255,255,255,.3);
   border-radius:6px;padding:4px 8px;color:rgba(255,255,255,.66);white-space:nowrap;flex-shrink:0;
 }
-.sidebar-foot small{font-size:12.5px;line-height:1.4;}
+.sidebar-foot small{font-size:12.5px;line-height:1.5;display:flex;flex-direction:column;gap:1px;min-width:0;}
+.sidebar-foot small span{display:block;white-space:nowrap;}
 
 .main{flex:1;margin-left:var(--sidebar-w);min-width:0;}
 .view{display:none;width:100%;max-width:1380px;margin:0 auto;padding:32px 32px 64px;}
@@ -689,7 +690,7 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
     <nav class="nav" id="nav"></nav>
     <div class="sidebar-foot">
       <span class="seal">知行合一</span>
-      <small>需要记时马上记<br>需要做时看得到</small>
+      <small><span>需要记时马上记</span><span>需要做时看得到</span></small>
     </div>
   </aside>
 
@@ -762,6 +763,7 @@ const I = {
   cloud:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18h10a4 4 0 0 0 .6-7.96A5.5 5.5 0 0 0 7 8.5 3.5 3.5 0 0 0 7 18z"/></svg>',
   download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19h14"/></svg>',
   bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2H4.5L6 16z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>',
+  mail:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6.5 8.5 6 8.5-6"/></svg>',
   palette:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.9 1.8-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-7.7-9-7.7z"/><circle cx="7.5" cy="11" r="1.1" fill="currentColor"/><circle cx="10" cy="7.5" r="1.1" fill="currentColor"/><circle cx="14.5" cy="7.5" r="1.1" fill="currentColor"/><circle cx="17" cy="11" r="1.1" fill="currentColor"/></svg>',
   info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 7.6v.1"/></svg>',
   feedback:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-4 3.5V16H4z"/><path d="M8 9h8M8 12h5"/></svg>',
@@ -853,8 +855,9 @@ function seed(){
     ],
     trash:{todos:[],notes:[]},
     summaries:[],
-    settings:{defaultPage:'home',doneSound:true,notify:false,
-      ai:{key:'',model:'doubao-1-5-pro-32k-250115',base:'https://ark.cn-beijing.volces.com/api/v3/chat/completions'},
+    settings:{defaultPage:'home',doneSound:true,notify:false,mailOn:false,
+      mail:{serviceId:'service_qavkobd',templateId:'template_dpct7b4',publicKey:'vEp5AY66dc2Lx8xU',to:''},
+      ai:{key:'',model:'doubao-seed-2-1-pro-260628',base:'https://ark.cn-beijing.volces.com/api/v3/chat/completions'},
       sumPrompt:DEFAULT_SUM_PROMPT,planPrompt:DEFAULT_PLAN_PROMPT},
     createdAt:Date.now()
   };
@@ -901,10 +904,17 @@ function migrate(d){
   if(!st.defaultPage)st.defaultPage='home';
   if(typeof st.doneSound!=='boolean')st.doneSound=true;
   if(typeof st.notify!=='boolean')st.notify=false;
-  if(!st.ai||typeof st.ai!=='object')st.ai={key:'',model:'doubao-1-5-pro-32k-250115',base:'https://ark.cn-beijing.volces.com/api/v3/chat/completions'};
-  if(!st.ai.base)st.ai.base='https://ark.cn-beijing.volces.com/api/v3/chat/completions';
-  if(!st.ai.model)st.ai.model='doubao-1-5-pro-32k-250115';
-  if(!d.settings.ai)d.settings.ai={key:'',model:'doubao-1-5-pro-32k-250115',base:'https://ark.cn-beijing.volces.com/api/v3/chat/completions'};
+  if(typeof st.mailOn!=='boolean')st.mailOn=false;
+  const PM={serviceId:'service_qavkobd',templateId:'template_dpct7b4',publicKey:'vEp5AY66dc2Lx8xU',to:''};
+  if(!st.mail||typeof st.mail!=='object')st.mail=Object.assign({},PM);
+  ['serviceId','templateId','publicKey'].forEach(k=>{if(!st.mail[k])st.mail[k]=PM[k];});
+  if(typeof st.mail.to!=='string')st.mail.to='';
+  const PA={key:'',model:'doubao-seed-2-1-pro-260628',base:'https://ark.cn-beijing.volces.com/api/v3/chat/completions'};
+  if(!st.ai||typeof st.ai!=='object')st.ai=Object.assign({},PA);
+  if(!st.ai.base)st.ai.base=PA.base;
+  if(!st.ai.model)st.ai.model=PA.model;
+  if(!st.ai.key)st.ai.key=PA.key;
+  if(!d.settings.ai)d.settings.ai=Object.assign({},PA);
   if(!st.sumPrompt)st.sumPrompt=DEFAULT_SUM_PROMPT;
   if(!st.planPrompt)st.planPrompt=DEFAULT_PLAN_PROMPT;
   return d;
@@ -1770,6 +1780,8 @@ function renderMe(){
         <div data-act="cat-manage">${row('tag','类型管理','笔记与待办共用一套类型，可改名、排序、新增',chev)}</div>
         ${row('bell','到期提醒音效','勾选完成、提醒到达时播放轻提示音',sw('doneSound'))}
         ${row('bell','浏览器通知','允许后按待办提醒时间推送（需浏览器授权）',sw('notify'))}
+        ${row('mail','重要事项邮件提醒','高优先级（重要）事项在提醒时间、截止时间各发一封邮件',sw('mailOn'))}
+        <div data-act="open-mail-cfg">${row('mail','邮件发送设置',mailReady()?'已配置 · 收件：'+mailTo():'配置 EmailJS 发送通道与收件邮箱（默认登录账号）',chev)}</div>
         <div class="me-row"><span class="mi">${I.palette}</span><span class="mt"><div class="m1">外观设置</div><div class="m2">浅色 · 深蓝导航（更多主题后续开放）</div></span></div>
         <div class="me-row"><span class="mi">${I.home}</span><span class="mt"><div class="m1">默认打开页面</div></span>
           <select class="me-select" data-act="default-page">
@@ -2117,6 +2129,9 @@ document.addEventListener('click',e=>{
     case 'open-todo': openTodo(d.id);break;
     case 'close-modal': closeModal();break;
     case 'open-cloud': openCloudModal();break;
+    case 'open-mail-cfg': openMailCfg();break;
+    case 'mail-save': saveMailCfg();closeModal();toast('邮件设置已保存');break;
+    case 'mail-test': mailTest();break;
     case 'cl-signup': cloudAuth('signup');break;
     case 'cl-signin': cloudAuth('signin');break;
     case 'cl-resend': cloudResend();break;
@@ -2383,9 +2398,46 @@ function toggleSetting(key){
     askNotifyPermission(p=>{if(p!=='granted'){toast('浏览器未授权通知，已保持关闭');DB.settings.notify=false;persist();renderMe();}else{toast('已开启浏览器通知，到提醒时间会推送');startReminderLoop();}});
   }
   if(key==='doneSound'&&DB.settings.doneSound)ding();
+  if(key==='mailOn'){
+    if(DB.settings.mailOn){
+      if(!mailReady())toast('已开启；请再点「邮件发送设置」补全发送通道，否则无法实际发出');
+      startReminderLoop();
+    }
+  }
   renderMe();
 }
 function rerenderCurrent(){({home:renderHome,todos:renderTodos,notes:renderNotes,calendar:renderCalendar,review:renderReview,summary:renderSummary,me:renderMe,trash:renderTrash})[currentRoute()]();}
+
+/* 重要事项邮件提醒：EmailJS 通道配置 */
+function openMailCfg(){
+  const m=DB.settings.mail||{},acc=(loadCloud().session&&loadCloud().session.email)||'';
+  $('#modalMask').innerHTML=`<div class="modal" style="max-width:580px">
+    <div class="modal-head"><h3>邮件发送设置</h3><button class="icon-x" data-act="close-modal">${I.x}</button></div>
+    <div class="modal-body">
+      <div class="cl-sub" style="margin-bottom:12px;line-height:1.6">高优先级（重要）事项会在<b>提醒时间</b>与<b>截止时间</b>各发一封邮件。网页本身不能直接发信，需一个免费的 <b>EmailJS</b> 通道（emailjs.com 注册，免费额度约 200 封/月）：①「Email Services」添加一个邮箱服务，复制 <b>Service ID</b>；②「Email Templates」新建模板，正文保留 <b>{{to_email}}、{{subject}}、{{message}}</b> 三个变量，复制 <b>Template ID</b>；③「Account → General」复制 <b>Public Key</b>。</div>
+      <div class="field"><label>Service ID</label><input type="text" id="mc-service" value="${esc(m.serviceId||'')}" placeholder="如 service_xxxxxx"></div>
+      <div class="field"><label>Template ID</label><input type="text" id="mc-template" value="${esc(m.templateId||'')}" placeholder="如 template_xxxxxx"></div>
+      <div class="field"><label>Public Key</label><input type="text" id="mc-key" value="${esc(m.publicKey||'')}" placeholder="EmailJS 账号的 Public Key"></div>
+      <div class="field"><label>收件邮箱（留空则发到登录账号邮箱${acc?'：'+acc:'，未登录时请填写'}）</label><input type="email" id="mc-to" value="${esc(m.to||'')}" placeholder="${acc||'you@example.com'}"></div>
+    </div>
+    <div class="modal-foot">
+      <div class="mf-l"><button class="btn btn-ghost" data-act="mail-test">发送测试邮件</button></div>
+      <div class="mf-r"><button class="btn btn-ghost" data-act="close-modal">取消</button><button class="btn btn-primary" data-act="mail-save">保存</button></div>
+    </div></div>`;
+  $('#modalMask').classList.add('show');
+}
+function saveMailCfg(){
+  const g=id=>($('#'+id)?.value||'').trim();
+  DB.settings.mail={serviceId:g('mc-service'),templateId:g('mc-template'),publicKey:g('mc-key'),to:g('mc-to')};
+  persist();renderMe();return DB.settings.mail;
+}
+async function mailTest(){
+  const m=saveMailCfg();
+  if(!m.serviceId||!m.templateId||!m.publicKey){toast('请先填齐 Service ID / Template ID / Public Key');return;}
+  toast('正在发送测试邮件…');
+  const ok=await sendMailX('【知行记】测试邮件','这是一封来自知行记的测试邮件，收到说明重要事项邮件提醒已配置成功。');
+  if(ok)toast('测试邮件已发送，请查收（含垃圾邮件）');
+}
 
 /* 关于 / 反馈 */
 function openAbout(){
@@ -2509,10 +2561,11 @@ function askNotifyPermission(cb){
     if(p&&typeof p.then==='function')p.then(cb);
   }catch(e){cb(Notification.permission);}
 }
-function fireReminder(t){
-  let n;
+function fireReminder(t,kind){
+  let n;const isDue=kind==='due';
+  const body=isDue?`「${t.title}」已到计划时间${t.time?' '+t.time:''}`:`${t.title}${t.time?'（计划 '+t.time+'）':''}`;
   try{
-    n=new Notification('知行记 · 事项提醒',{body:`${t.title}${t.time?'（计划 '+t.time+'）':''}`,tag:'zxj-'+t.id});
+    n=new Notification(isDue?'知行记 · 截止提醒':'知行记 · 事项提醒',{body,tag:'zxj-'+(isDue?'due-':'')+t.id});
   }catch(e){return;}
   n.onclick=()=>{try{window.focus();}catch(e){}go('todos');n.close();};
   if(DB.settings.doneSound)ding();
@@ -2521,19 +2574,66 @@ function checkReminders(){
   if(!DB.settings.notify||!('Notification'in window)||Notification.permission!=='granted')return;
   const now=Date.now();let changed=false;
   DB.todos.forEach(t=>{
-    if(t.done||!t.reminder||t._remindSent===t.reminder)return;
-    const ts=new Date((t.reminder||'').replace(' ','T')).getTime();
-    if(isNaN(ts)||ts>now)return;
-    t._remindSent=t.reminder;changed=true;fireReminder(t);
+    if(t.done)return;
+    // 提醒时间点
+    if(t.reminder&&t._remindSent!==t.reminder){
+      const ts=new Date((t.reminder||'').replace(' ','T')).getTime();
+      if(!isNaN(ts)&&ts<=now){t._remindSent=t.reminder;changed=true;fireReminder(t,'reminder');}
+    }
+    // 截止时间点（日期+计划时间，无时间按当天09:00）
+    if(t.date){
+      const dueKey=(t.date||'')+' '+(t.time||'09:00'),ds=todoDueStamp(t);
+      if(ds!==null&&!isNaN(ds)&&ds<=now&&t._dueNotifSent!==dueKey){t._dueNotifSent=dueKey;changed=true;fireReminder(t,'due');}
+    }
   });
   if(changed)persist();
 }
 function startReminderLoop(){
-  checkReminders();
+  checkReminders();checkMails();
   if(reminderTimer)clearInterval(reminderTimer);
-  reminderTimer=setInterval(checkReminders,30000);
+  reminderTimer=setInterval(()=>{checkReminders();checkMails();},30000);
 }
 // 已授权时：修改提醒时间会使 _remindSent 与新 reminder 不一致，从而按新时间再推一次
+
+/* ===== 重要（高优先级）事项：提醒时间 + 截止时间各发一封邮件到账号邮箱（经 EmailJS，纯前端发送）===== */
+function mailCfg(){return DB.settings.mail||{};}
+function mailReady(){const m=mailCfg();return !!(DB.settings.mailOn&&m.serviceId&&m.templateId&&m.publicKey);}
+function mailTo(){
+  const m=mailCfg();
+  if(m.to&&/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(m.to))return m.to;
+  const c=loadCloud();return (c.session&&c.session.email)||'';
+}
+let mailErrToastAt=0;
+async function sendMailX(subject,text){
+  if(!mailReady())return false;
+  const to=mailTo();
+  if(!to){const now=Date.now();if(now-mailErrToastAt>30000){mailErrToastAt=now;toast('邮件提醒：未找到收件邮箱（登录账号或在设置中填写）');}return false;}
+  const m=mailCfg();
+  try{
+    const r=await fetch('https://api.emailjs.com/api/v1.0/email/send',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({service_id:m.serviceId,template_id:m.templateId,user_id:m.publicKey,
+        template_params:{to_email:to,subject:subject,message:text,title:subject,to_name:to}})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return true;
+  }catch(e){const now=Date.now();if(now-mailErrToastAt>30000){mailErrToastAt=now;toast('重要事项邮件发送失败：'+e.message+'（本地提醒不受影响）');}return false;}
+}
+function todoDueStamp(t){if(!t.date)return null;return new Date((t.date+' '+(t.time||'09:00')).replace(' ','T')).getTime();}
+function checkMails(){
+  if(!mailReady())return;
+  const now=Date.now();let changed=false;
+  DB.todos.forEach(t=>{
+    if(t.done||t.priority!=='high')return; // 仅高优先级（重要）事项
+    if(t.reminder&&t._mailRemindSent!==t.reminder){
+      const ts=new Date(t.reminder.replace(' ','T')).getTime();
+      if(!isNaN(ts)&&ts<=now){t._mailRemindSent=t.reminder;changed=true;
+        sendMailX('【知行记·提醒】'+t.title,`事项「${t.title}」已到提醒时间。\n计划时间：${t.date||'未设日期'}${t.time?' '+t.time:''}\n请及时处理。`);}
+    }
+    const due=todoDueStamp(t),dueKey=(t.date||'')+' '+(t.time||'09:00');
+    if(due!==null&&!isNaN(due)&&t._mailDueSent!==dueKey&&due<=now){t._mailDueSent=dueKey;changed=true;
+      sendMailX('【知行记·截止】'+t.title,`重要事项「${t.title}」已到计划截止时间（${dueKey}），请立即处理。`);}
+  });
+  if(changed)persist();
+}
 
 /* ============================================================
    十七·六、云数据库自动同步（Supabase / 兼容 PostgREST 的云库）
@@ -2777,7 +2877,7 @@ $('#m-new-note').addEventListener('click',createNote);
 // 默认打开页（设置 hash 会触发已绑定的 hashchange → renderRoute）
 if(location.hash){renderRoute();}else{location.hash='#/'+DB.settings.defaultPage;}
 // 通知巡检驻留：开关打开即启动，是否真正推送由 checkReminders 按权限门控（授权后无需刷新即生效）
-if('Notification'in window&&DB.settings.notify)startReminderLoop();
+if(DB.settings.notify||DB.settings.mailOn)startReminderLoop();
 // 云同步：已登录账号则启动拉取/定时同步
 (function(){const c=loadCloud();if(c.enabled&&c.url&&c.key&&c.session)startCloudLoop();})();
 </script>
