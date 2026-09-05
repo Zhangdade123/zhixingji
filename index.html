@@ -2542,6 +2542,8 @@ function startReminderLoop(){
    - 冲突按版本号 _rev 做 last-write-wins；离线照常用 localStorage，联网自动合并
    ============================================================ */
 const CLOUD_STORE='zhixingji-cloud';
+// 内置默认云项目（Project URL 与 publishable/anon key 本就是公开客户端标识，安全由数据库行级隔离保证）；
+// 任何设备打开本网页都自带项目配置，只需邮箱登录、无需重复填写；换项目时仍可在弹窗手动覆盖。
 const CLOUD_SQL=`-- 账号版：每个登录账号只能读写自己的数据；在 Supabase 的 SQL Editor 执行一次
 create table if not exists public.zxj_sync (
   id text,
@@ -2566,7 +2568,7 @@ create policy "zxj owner all" on public.zxj_sync
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 revoke all on public.zxj_sync from anon;`;
 function loadCloud(){
-  const def={url:'',key:'',enabled:false,device:devId(),bound:false,session:null,lastUid:null,lastPushAt:0,lastPullAt:0,remoteRev:0,status:'idle'};
+  const def={url:'https://xpspmpgicjdtmmclzbuo.supabase.co',key:'sb_publishable_s2T0ztl8_RDdI0lXUn70tw_JFuUej_Z',enabled:false,device:devId(),bound:false,session:null,lastUid:null,lastPushAt:0,lastPullAt:0,remoteRev:0,status:'idle'};
   try{return Object.assign(def,JSON.parse(localStorage.getItem(CLOUD_STORE)||'{}'));}
   catch(e){return def;}
 }
@@ -2709,7 +2711,7 @@ function openCloudModal(){
       <div class="cl-login-box">
         <div class="field" style="margin-bottom:10px"><label>邮箱</label><input type="email" id="cl-email" placeholder="you@example.com"></div>
         <div class="field"><label>密码（至少 6 位）</label><input type="password" id="cl-pwd" placeholder="设置/输入登录密码"></div>
-        <div class="cl-sub">首次使用点「注册账号」；若项目开启了邮箱确认，注册后先到邮箱点确认链接再登录。<button class="btn-text" data-act="cl-resend" style="font-size:13.5px;padding:2px 4px">重发确认邮件</button></div>
+        <div class="cl-sub">项目地址与密钥已内置，一般无需填写；直接输入邮箱和密码，已有账号点「登录账号」，首次使用点「注册账号」。<button class="btn-text" data-act="cl-resend" style="font-size:13.5px;padding:2px 4px">重发确认邮件</button></div>
       </div>`}
       <div class="field"><label>建表语句（SQL Editor 执行一次）<button class="btn-text" data-act="cl-copy-sql" style="float:right;font-size:13.5px">复制 SQL</button></label>
         <textarea class="cl-sql" id="cl-sql" readonly>${CLOUD_SQL}</textarea>
