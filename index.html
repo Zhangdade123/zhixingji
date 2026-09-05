@@ -473,6 +473,26 @@ button.rev-mark{font:inherit;padding:0;background:#fff;cursor:pointer;transition
 .me-select{border:1px solid var(--border);border-radius:9px;padding:6px 9px;font-size:14.5px;background:#fff;color:var(--ink);}
 
 /* ===== Modal / 抽屉 ===== */
+/* 到点强提醒弹窗（网页内，前台醒目） */
+.remind-layer{position:fixed;inset:0;background:rgba(23,32,51,.52);z-index:110;display:none;align-items:center;justify-content:center;padding:24px;animation:mf .18s ease;}
+.remind-layer.show{display:flex;}
+.remind-card{background:#fff;border-radius:20px;width:100%;max-width:446px;overflow:hidden;box-shadow:var(--shadow-pop);animation:mp .22s ease;border:1px solid var(--border);}
+.remind-top{background:linear-gradient(135deg,var(--nav),var(--accent));padding:20px 24px 16px;color:#fff;display:flex;align-items:center;gap:13px;}
+.remind-bell{width:46px;height:46px;border-radius:13px;background:rgba(255,255,255,.18);display:grid;place-items:center;flex:none;animation:ring 1.1s ease;}
+.remind-bell svg{width:24px;height:24px;}
+.remind-tag{font-size:12.5px;opacity:.86;letter-spacing:1.5px;}
+.remind-kind{font-family:var(--serif);font-size:20px;font-weight:700;margin-top:3px;}
+.remind-body{padding:20px 24px 6px;}
+.remind-title{font-size:19px;font-weight:700;color:var(--ink);line-height:1.5;word-break:break-word;}
+.remind-time{margin-top:10px;font-size:14px;color:var(--muted);display:flex;align-items:center;gap:7px;}
+.remind-time svg{width:15px;height:15px;flex:none;}
+.remind-more{margin-top:8px;font-size:13px;color:var(--accent);font-weight:500;}
+.remind-actions{display:flex;gap:10px;padding:16px 24px 22px;}
+.remind-actions button{flex:1;height:44px;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:#fff;color:var(--body);transition:.15s;}
+.remind-actions button:hover{background:var(--bg);}
+.remind-actions .r-primary{background:var(--accent);border-color:var(--accent);color:#fff;flex:1.25;}
+.remind-actions .r-primary:hover{background:var(--accent-h);}
+@keyframes ring{0%{transform:rotate(0)}18%{transform:rotate(15deg)}36%{transform:rotate(-12deg)}54%{transform:rotate(8deg)}72%{transform:rotate(-6deg)}100%{transform:rotate(0)}}
 .modal-mask{
   position:fixed;inset:0;background:rgba(23,32,51,.42);z-index:80;display:none;align-items:center;justify-content:center;padding:24px;
   animation:mf .18s ease;
@@ -725,6 +745,7 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 <!-- ===== 手机底栏 ===== -->
 <nav class="tabbar" id="tabbar"></nav>
 <div class="modal-mask" id="modalMask"></div>
+<div class="remind-layer" id="remindLayer"></div>
 <div class="toast-root" id="toastRoot"></div>
 
 <script>
@@ -856,7 +877,7 @@ function seed(){
     trash:{todos:[],notes:[]},
     summaries:[],
     settings:{defaultPage:'home',doneSound:true,notify:false,mailOn:false,
-      mail:{serviceId:'service_qavkobd',templateId:'template_dpct7b4',publicKey:'vEp5AY66dc2Lx8xU',to:''},
+      mail:{serviceId:'service_qavkobd',templateId:'template_dpct7b4',publicKey:'rJuPzdo1L0fNNPsU_',to:''},
       ai:{key:'',model:'doubao-seed-2-1-pro-260628',base:'https://ark.cn-beijing.volces.com/api/v3/chat/completions'},
       sumPrompt:DEFAULT_SUM_PROMPT,planPrompt:DEFAULT_PLAN_PROMPT},
     createdAt:Date.now()
@@ -905,7 +926,7 @@ function migrate(d){
   if(typeof st.doneSound!=='boolean')st.doneSound=true;
   if(typeof st.notify!=='boolean')st.notify=false;
   if(typeof st.mailOn!=='boolean')st.mailOn=false;
-  const PM={serviceId:'service_qavkobd',templateId:'template_dpct7b4',publicKey:'vEp5AY66dc2Lx8xU',to:''};
+  const PM={serviceId:'service_qavkobd',templateId:'template_dpct7b4',publicKey:'rJuPzdo1L0fNNPsU_',to:''};
   if(!st.mail||typeof st.mail!=='object')st.mail=Object.assign({},PM);
   ['serviceId','templateId','publicKey'].forEach(k=>{if(!st.mail[k])st.mail[k]=PM[k];});
   if(typeof st.mail.to!=='string')st.mail.to='';
@@ -2162,6 +2183,9 @@ document.addEventListener('click',e=>{
     case 'qn-del-file': ui.quickFiles.splice(Number(d.i),1);renderHome();break;
     case 'nt-del-file': ui.ntFiles.splice(Number(d.i),1);renderNtFiles();break;
     case 'switch': toggleSetting(d.key);break;
+    case 'remind-ok': closeReminderCard();break;
+    case 'remind-goto': closeReminderCard();go('todos');break;
+    case 'remind-snooze': snoozeReminder(d.id,d.kind);break;
     case 'export': exportData(d.kind);break;
     case 'about': openAbout();break;
     case 'feedback': openFeedback();break;
@@ -2561,32 +2585,82 @@ function askNotifyPermission(cb){
     if(p&&typeof p.then==='function')p.then(cb);
   }catch(e){cb(Notification.permission);}
 }
-function fireReminder(t,kind){
-  let n;const isDue=kind==='due';
+// 系统级通知：网页在后台/最小化时由 Windows 在屏幕右下角弹出
+function fireSystemNote(t,kind){
+  if(!('Notification'in window)||Notification.permission!=='granted')return;
+  const isDue=kind==='due';
   const body=isDue?`「${t.title}」已到计划时间${t.time?' '+t.time:''}`:`${t.title}${t.time?'（计划 '+t.time+'）':''}`;
   try{
-    n=new Notification(isDue?'知行记 · 截止提醒':'知行记 · 事项提醒',{body,tag:'zxj-'+(isDue?'due-':'')+t.id});
-  }catch(e){return;}
-  n.onclick=()=>{try{window.focus();}catch(e){}go('todos');n.close();};
-  if(DB.settings.doneSound)ding();
+    const n=new Notification(isDue?'知行记 · 截止提醒':'知行记 · 事项提醒',{body,tag:'zxj-'+(isDue?'due-':'')+t.id});
+    n.onclick=()=>{try{window.focus();}catch(e){}go('todos');n.close();};
+  }catch(e){}
 }
+// 网页内强提醒弹窗队列（前台更醒目）
+let remindQueue=[],remindShowing=false;
+const BELL_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
+const CLOCK_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+function remindTimeText(t,kind){
+  if(kind==='due')return '截止 '+(t.date||'')+(t.time?' '+t.time:' 09:00');
+  return t.reminder?('提醒 '+(t.reminder||'').replace('T',' ')):'';
+}
+function enqueueReminder(t,kind,isSnooze){
+  if(!isSnooze)fireSystemNote(t,kind);     // 后台弹 Windows 系统通知（首次）
+  if(DB.settings.doneSound)ding();        // 提示音
+  remindQueue.push({id:t.id,kind,title:t.title,tt:remindTimeText(t,kind)});
+  showNextReminder();
+}
+function showNextReminder(){
+  if(remindShowing)return;
+  if(document.visibilityState==='hidden')return; // 后台不抢，切回前台再弹
+  let item=remindQueue.shift();if(!item)return;
+  const t=DB.todos.find(x=>x.id===item.id);
+  if(!t||t.done)return showNextReminder();       // 已删除/已完成则跳过
+  remindShowing=true;const isDue=item.kind==='due',rest=remindQueue.length;
+  $('#remindLayer').innerHTML=`<div class="remind-card" data-id="${item.id}">
+    <div class="remind-top"><div class="remind-bell">${BELL_SVG}</div>
+      <div><div class="remind-tag">${isDue?'DUE · 截止时间到':'REMINDER · 事项提醒'}</div>
+      <div class="remind-kind">${isDue?'该事项已到截止时间':'到点提醒，请注意处理'}</div></div></div>
+    <div class="remind-body">
+      <div class="remind-title">${esc(item.title)}</div>
+      <div class="remind-time">${CLOCK_SVG}<span>${esc(item.tt)}</span></div>
+      ${rest?`<div class="remind-more">队列中还有 ${rest} 条待提醒</div>`:''}
+    </div>
+    <div class="remind-actions">
+      <button data-act="remind-snooze" data-id="${item.id}" data-kind="${item.kind}">延后10分钟</button>
+      <button data-act="remind-goto" data-id="${item.id}">查看事项</button>
+      <button class="r-primary" data-act="remind-ok">知道了</button>
+    </div></div>`;
+  $('#remindLayer').classList.add('show');
+}
+function closeReminderCard(){const l=$('#remindLayer');l.classList.remove('show');l.innerHTML='';remindShowing=false;setTimeout(showNextReminder,140);}
+function snoozeReminder(id,kind){
+  const t=DB.todos.find(x=>x.id===id);
+  if(t){t._snooze=Date.now()+10*60*1000;t._snoozeKind=kind||'reminder';persist();}
+  closeReminderCard();toast('已延后 10 分钟，到点再次提醒');
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')showNextReminder();});
 function checkReminders(){
-  if(!DB.settings.notify||!('Notification'in window)||Notification.permission!=='granted')return;
-  const now=Date.now();let changed=false;
+  if(!DB.settings.notify)return;   // 总开关；系统通知权限只影响是否弹 Windows 通知，不影响网页内弹窗
+  const now=Date.now();let changed=false;const hit=[];
   DB.todos.forEach(t=>{
     if(t.done)return;
+    if(t._snooze&&now<t._snooze)return; // 延后窗口内不重复
     // 提醒时间点
     if(t.reminder&&t._remindSent!==t.reminder){
       const ts=new Date((t.reminder||'').replace(' ','T')).getTime();
-      if(!isNaN(ts)&&ts<=now){t._remindSent=t.reminder;changed=true;fireReminder(t,'reminder');}
+      if(!isNaN(ts)&&ts<=now){t._remindSent=t.reminder;changed=true;hit.push([t,'reminder',false]);}
     }
     // 截止时间点（日期+计划时间，无时间按当天09:00）
     if(t.date){
       const dueKey=(t.date||'')+' '+(t.time||'09:00'),ds=todoDueStamp(t);
-      if(ds!==null&&!isNaN(ds)&&ds<=now&&t._dueNotifSent!==dueKey){t._dueNotifSent=dueKey;changed=true;fireReminder(t,'due');}
+      if(ds!==null&&!isNaN(ds)&&ds<=now&&t._dueNotifSent!==dueKey){t._dueNotifSent=dueKey;changed=true;hit.push([t,'due',false]);}
     }
+    // 「延后10分钟」到期：只再响铃+网页弹窗，不重复发 Windows 系统通知
+    if(t._snooze&&now>=t._snooze&&t._snoozeFired!==t._snooze){t._snoozeFired=t._snooze;changed=true;hit.push([t,t._snoozeKind||'reminder',true]);}
   });
   if(changed)persist();
+  hit.forEach(h=>enqueueReminder(h[0],h[1],h[2]));
+  showNextReminder();
 }
 function startReminderLoop(){
   checkReminders();checkMails();
@@ -2613,7 +2687,7 @@ async function sendMailX(subject,text){
     const r=await fetch('https://api.emailjs.com/api/v1.0/email/send',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({service_id:m.serviceId,template_id:m.templateId,user_id:m.publicKey,
         template_params:{to_email:to,subject:subject,message:text,title:subject,to_name:to}})});
-    if(!r.ok)throw new Error('HTTP '+r.status);
+    if(!r.ok){let d='';try{d=await r.text();}catch(e){}throw new Error('HTTP '+r.status+(d?'：'+d.slice(0,140):''));}
     return true;
   }catch(e){const now=Date.now();if(now-mailErrToastAt>30000){mailErrToastAt=now;toast('重要事项邮件发送失败：'+e.message+'（本地提醒不受影响）');}return false;}
 }
