@@ -703,6 +703,7 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 .sidebar-foot{justify-content:center;text-align:center;flex-wrap:wrap;}
 .modal > .modal-foot{padding:0 22px 20px;flex-wrap:wrap;}
 .modal-body p{margin:0 0 10px;}
+.check-row{display:flex;gap:8px;align-items:center;margin:7px 0}.check-row input[type=text]{min-width:0;flex:1}.check-row input[type=checkbox],.weekly-item input{width:18px!important;flex:none}.check-progress{display:flex;gap:8px;align-items:center;color:var(--muted)}.check-progress progress{width:90px;height:8px}.weekly-item{display:flex;gap:10px;align-items:center;margin:12px 0;overflow-wrap:anywhere}.modal-body h4{margin:16px 0 8px}.pf-l{flex-wrap:wrap}.modal-body{overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -755,6 +756,62 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 <div class="toast-root" id="toastRoot"></div>
 
 <script>
+// Attachment transfer state is device-local; only confirmed object references sync.
+const attachmentTransfers=new Map();
+let attachmentScanBusy=false;
+function attachmentStatus(a){const s=attachmentTransfers.get(a.id);return s?.busy?'上传中':s?.error?'仅本机 · 上传失败':a.cloudFile?'已同步':'仅本机';}
+function attachmentLink(a){return a.id?`<button class="btn-text" data-act="download-attachment" data-file="${esc(a.id)}">${esc(a.name)}</button><small data-file-status="${esc(a.id)}">${attachmentStatus(a)}</small><button class="btn-text" data-act="upload-attachment" data-file="${esc(a.id)}">${a.cloudFile?'检查同步':'上传 / 重试'}</button>`:`<span>${esc(a.name)} <small>仅文件名，需重新添加原文件</small></span>`;}
+function refreshAttachmentStatus(){document.querySelectorAll('[data-file-status]').forEach(el=>{const a=allAttachments().find(a=>a.id===el.dataset.fileStatus);if(a){el.textContent=attachmentStatus(a);el.title=attachmentTransfers.get(a.id)?.error||'';}});}
+async function attachmentContext(){const c=loadCloud(),epoch=cloudEpoch;if(storageBlocked||!c.enabled||!c.session||!c.bound||c.lastUid!==c.session.uid||c.status==='conflict')throw Error('请先登录并完成账号数据同步，处理版本冲突');if(!await ensureToken()||!cloudSessionMatches(c,epoch))throw Error('登录已变化，请重试');return {c:loadCloud(),epoch};}
+function storageObjectURL(c,path,download=false){return cloudBase(c)+'/storage/v1/object/'+(download?'authenticated/':'')+'zxj-files/'+path.split('/').map(encodeURIComponent).join('/');}
+async function uploadAttachment(id,manual=true){
+  if(attachmentTransfers.get(id)?.busy)return;
+  const a=allAttachments().find(a=>a.id===id);if(!a)return;
+  attachmentTransfers.set(id,{busy:true});refreshAttachmentStatus();fileJobs++;
+  try{
+    const {c,epoch}=await attachmentContext();
+    if(a.cloudFile){if(a.cloudFile.owner!==c.session.uid||a.cloudFile.base!==cloudBase(c))throw Error('原文件属于其他账号或存储项目');if(manual)toast('原文件已上传；附件清单随账号数据同步');return;}
+    const blob=await blobGet(id);if(!blob)throw Error('此设备没有原文件，请在最初添加文件的设备上传');
+    if(blob.size>20*1048576)throw Error('文件超过 20MB');
+    const path=c.session.uid+'/'+uid();
+    await cloudFetch(storageObjectURL(c,path),{method:'POST',headers:{...cloudHeaders(c),'Content-Type':blob.type||'application/octet-stream','x-upsert':'false'},body:blob});
+    if(!cloudSessionMatches(c,epoch)||!allAttachments().includes(a)||storageBlocked)throw Error('账号或附件已变化，上传结果未关联，请重试');
+    for(const ref of allAttachments().filter(x=>x.id===id)){ref.cloudFile={base:cloudBase(c),owner:c.session.uid,path};ref.localOnly=false;}persist();
+    attachmentTransfers.delete(id);if(manual)toast('原文件已上传，正在同步附件清单');
+  }catch(e){attachmentTransfers.set(id,{error:e.message+'。若提示 HTTP 400/403/404，请先执行附件存储初始化 SQL。'});if(manual)toast(attachmentTransfers.get(id).error);}
+  finally{fileJobs--;const s=attachmentTransfers.get(id);if(s?.busy)attachmentTransfers.delete(id);refreshAttachmentStatus();}
+}
+async function syncAttachments(){if(attachmentScanBusy||storageBlocked)return;const c=loadCloud();if(!c.enabled||!c.bound||!c.session||c.lastUid!==c.session.uid||c.status==='conflict')return;attachmentScanBusy=true;try{for(const a of [...new Map(allAttachments().filter(a=>a.id).map(a=>[a.id,a])).values()])if(!a.cloudFile&&!attachmentTransfers.has(a.id))await uploadAttachment(a.id,false);}finally{attachmentScanBusy=false;}}
+async function downloadAttachment(id){try{const a=allAttachments().concat(ui.ntFiles||[],ui.quickFiles||[]).find(a=>a.id===id);if(!a)return;let blob=await blobGet(id);if(!blob&&a.cloudFile){const {c,epoch}=await attachmentContext();if(a.cloudFile.owner!==c.session.uid||a.cloudFile.base!==cloudBase(c)||!a.cloudFile.path.startsWith(c.session.uid+'/'))throw Error('请登录原文件所属账号和项目');toast('正在下载原文件');const r=await cloudFetch(storageObjectURL(c,a.cloudFile.path,true),{headers:cloudHeaders(c)});blob=await r.blob();if(!cloudSessionMatches(c,epoch))throw Error('账号已切换，已取消下载');if(blob.size>20*1048576)throw Error('文件超过 20MB');try{await blobPut(id,blob);}catch(e){toast('本机缓存空间不足，仍可下载文件');}}if(!blob)throw Error('仅本机附件：请在原设备上传后再同步');downloadBlob(a.name,blob);}catch(e){toast('附件下载失败：'+e.message);}}
+function attachmentPanel(){flushEditor();$('#modalMask').innerHTML=`<div class="modal"><div class="modal-head"><h3>附件跨设备同步</h3><button data-act="close-modal">关闭</button></div><div class="modal-body"><p>同一账号登录后，原文件上传到私有存储。首次使用请在 Supabase SQL 编辑器执行初始化脚本，再点击上传。本机没有原文件的旧附件需在原设备上传。</p><a href="./知行记-附件存储.sql" download>下载附件存储初始化 SQL</a><p>上传后还需完成账号数据同步，其他设备才能看到附件。移除附件不会立即清除云文件，避免影响其他引用及备份。</p>${allAttachments().filter((a,i,arr)=>arr.findIndex(x=>x.id===a.id)===i).map(a=>`<p>${attachmentLink(a)}</p>`).join('')||'<p>暂无附件</p>'}</div></div>`;$('#modalMask').classList.add('show');}
+function checklistProgress(t){const a=t.checklist||[];return a.length?`<small class="check-progress">步骤 ${a.filter(x=>x.done).length}/${a.length}<progress max="${a.length}" value="${a.filter(x=>x.done).length}" aria-label="子任务完成进度"></progress></small>`:'';}
+function checklistRow(x={}){return `<div class="check-row"><input type="checkbox" aria-label="步骤完成" ${x.done?'checked':''}><input type="text" maxlength="300" aria-label="步骤名称" value="${esc(x.title||'')}" placeholder="输入一个步骤"><button type="button" data-check-remove aria-label="删除步骤">×</button></div>`;}
+function checklistEditor(t){return `<div class="field"><label>子任务与检查清单</label><div id="checklist-rows">${(t.checklist||[]).map(checklistRow).join('')}</div><button type="button" data-check-add>＋ 添加步骤</button> <button type="button" data-check-paper>添加论文步骤</button><p class="cl-sub">勾选保存后更新进度；完成全部步骤后可手动完成事项。</p></div>`;}
+function readChecklist(){return [...document.querySelectorAll('#checklist-rows .check-row')].map(el=>({title:el.querySelector('input[type=text]').value.trim(),done:el.querySelector('input[type=checkbox]').checked})).filter(x=>x.title);}
+function weekBounds(day){const n=(pdate(day).getDay()+6)%7,start=addDays(day,-n);return [start,addDays(start,6)];}
+function beijingDate(stamp){return Number.isFinite(stamp)?new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai'}).format(new Date(stamp)):'';}
+function weeklyData(day){const [start,end]=weekBounds(day),inside=d=>d>=start&&d<=end;return {start,end,next:addDays(start,7),done:DB.todos.filter(t=>t.done&&inside(beijingDate(t.doneAt))),delayed:DB.todos.filter(t=>(!t.done&&t.date&&t.date<=end&&t.date<businessToday())||(t.dateChanges||[]).some(x=>inside(beijingDate(x.at))&&x.to>x.from)),notes:DB.notes.filter(n=>inside(beijingDate(n.createdAt)))};}
+function openWeekly(day=businessToday()){
+  flushEditor();const w=weeklyData(day);const item=(r,type)=>`<label class="weekly-item"><input type="checkbox" data-week-type="${type}" value="${esc(r.id)}"><span>${esc(r.title||'无标题')}${type==='todo'&&r.done?'（已完成，可建立后续事项）':''}</span></label>`;
+  $('#modalMask').innerHTML=`<div class="modal"><div class="modal-head"><h3>每周回顾与下周安排</h3><button data-act="close-modal">关闭</button></div><div class="modal-body"><label>选择回顾周内任意一天 <input type="date" id="weekly-day" value="${w.start}"></label><p>${w.start} ～ ${w.end}</p><h4>完成事项（${w.done.length}）</h4>${w.done.map(t=>item(t,'todo')).join('')||'<p>暂无</p>'}<h4>延期事项（${w.delayed.length}）</h4><p>包含当前逾期事项及本周记录的向后改期；旧版本改期历史无法追溯。</p>${w.delayed.map(t=>item(t,'todo')).join('')||'<p>暂无</p>'}<h4>新增笔记（${w.notes.length}）</h4>${w.notes.map(n=>item(n,'note')).join('')||'<p>暂无</p>'}<label>安排到下周 <input type="date" id="weekly-target" min="${w.next}" max="${addDays(w.next,6)}" value="${w.next}"></label><p>未完成事项移到所选日期；已完成事项与笔记生成后续待办。同一来源同一周不会重复生成。新事项不自动设置提醒。</p><button class="btn btn-primary" id="weekly-generate">将勾选内容安排到下周</button></div></div>`;
+  $('#modalMask').classList.add('show');$('#weekly-day').onchange=e=>{if(e.target.value)openWeekly(e.target.value);};$('#weekly-generate').onclick=()=>generateWeekly(w);
+}
+function recordDateChange(t,from,to){if(from&&to&&to>from)(t.dateChanges||(t.dateChanges=[])).push({from,to,at:Date.now()});}
+function generateWeekly(w){
+  if(storageBlocked){toast('请先恢复数据保存');return;}const target=$('#weekly-target').value;if(target<w.next||target>addDays(w.next,6)){toast('请选择下周范围内的日期');return;}
+  const selected=[...document.querySelectorAll('[data-week-type]:checked')],seen=new Set();let count=0;
+  for(const el of selected){const type=el.dataset.weekType,key=type+':'+el.value+':'+w.next;if(seen.has(key))continue;seen.add(key);const src=(type==='todo'?DB.todos:DB.notes).find(x=>x.id===el.value);if(!src)continue;
+    if(type==='todo'&&!src.done){if(src.date===target)continue;recordDateChange(src,src.date,target);src.date=target;src.reminder=null;count++;continue;}
+    if([...DB.todos,...DB.trash.todos.map(x=>x.item)].some(t=>t.weeklySource===key))continue;
+    DB.todos.push({id:uid(),title:(type==='note'?'跟进：':'后续：')+(src.title||'无标题'),cat:src.cat||DB.categories[0].id,date:target,time:null,reminder:null,priority:src.priority||'mid',tags:[...(src.tags||[])],note:'来自 '+w.start+' ～ '+w.end+' 每周回顾',attachments:[],checklist:[],repeat:'none',done:false,doneAt:null,createdAt:Date.now(),weeklySource:key,linkedNoteId:type==='note'?src.id:null});count++;
+  }
+  if(!selected.length){toast('请先勾选要安排的内容');return;}if(count){persist();rerenderCurrent();}toast(count?'已安排 '+count+' 条待办':'所选内容已安排，无需重复生成');
+}
+function initFeatures(){
+  setInterval(syncAttachments,30000);
+  document.addEventListener('click',e=>{const el=e.target.closest('button');if(!el)return;const rows=$('#checklist-rows');if(el.hasAttribute('data-check-remove'))el.closest('.check-row').remove();if(rows&&el.hasAttribute('data-check-add'))rows.insertAdjacentHTML('beforeend',checklistRow());if(rows&&el.hasAttribute('data-check-paper'))for(const title of ['文献检索','实验与数据整理','绘图','撰写初稿','修改与校对'])rows.insertAdjacentHTML('beforeend',checklistRow({title}));});
+}
+
 // V2 reliability primitives: initialized before loading application data.
 let storageBlocked=false,bootLoadError='',bootRaw=null,fileJobs=0,cloudEpoch=0,authBusy=false;
 let editorSession=null,blobDBPromise=null,cloudConflict=null,importPreview=null;
@@ -794,6 +851,9 @@ function validateData(d){
       for(const k of ['title','content','note','name','date','time','reminder','cat'])if(r[k]!=null&&typeof r[k]!=='string')throw Error(k+' 字段格式错误');
       if(r.tags!==undefined&&(!Array.isArray(r.tags)||r.tags.some(t=>typeof t!=='string')))throw Error('标签格式错误');
       if(r.attachments!==undefined&&(!Array.isArray(r.attachments)||r.attachments.some(a=>!a||typeof a.name!=='string'||(a.id&&!validId(a.id)))))throw Error('附件格式错误');
+      if(r.checklist!==undefined&&(!Array.isArray(r.checklist)||r.checklist.some(x=>!x||typeof x.title!=='string'||typeof x.done!=='boolean')))throw Error('检查清单格式错误');
+      if(r.dateChanges!==undefined&&(!Array.isArray(r.dateChanges)||r.dateChanges.some(x=>!x||!Number.isFinite(x.at)||typeof x.from!=='string'||typeof x.to!=='string')))throw Error('改期历史格式错误');
+      for(const a of r.attachments||[])if(a.cloudFile){const f=a.cloudFile;if(typeof f.base!=='string'||typeof f.owner!=='string'||typeof f.path!=='string'||!/^https:\/\//.test(f.base)||!validId(f.owner)||!new RegExp('^'+f.owner+'/[a-zA-Z0-9_-]{1,128}$').test(f.path))throw Error('云附件引用格式错误');}
       if(r.date!=null&&r.date!==''&&!/^\d{4}-\d{2}-\d{2}$/.test(r.date))throw Error('事项日期格式错误');
       if(r.time!=null&&r.time!==''&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(r.time))throw Error('事项时间格式错误');
       if(r.reminder!=null&&r.reminder!==''&&!/^\d{4}-\d{2}-\d{2}[ T]([01]\d|2[0-3]):[0-5]\d$/.test(r.reminder))throw Error('提醒时间格式错误');
@@ -815,8 +875,6 @@ function blobDB(){
 async function blobPut(id,blob){const db=await blobDB();return new Promise((res,rej)=>{const tx=db.transaction('files','readwrite');tx.objectStore('files').put(blob,id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error);});}
 async function blobGet(id){const db=await blobDB();return new Promise((res,rej)=>{const r=db.transaction('files').objectStore('files').get(id);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
 function allAttachments(d=DB){return [...d.todos,...d.notes,...d.trash.todos.map(x=>x.item),...d.trash.notes.map(x=>x.item)].flatMap(r=>r.attachments||[]);}
-function attachmentLink(a){return a.id?`<button class="btn-text" data-act="download-attachment" data-file="${esc(a.id)}">${esc(a.name)}</button><small>本机文件</small>`:`<span>${esc(a.name)} <small>仅文件名，需重新添加原文件</small></span>`;}
-async function downloadAttachment(id){try{const a=allAttachments().concat(ui.ntFiles,ui.quickFiles).find(a=>a.id===id);if(!a)return;const blob=await blobGet(id);if(!blob){toast('此设备没有原文件，请从完整备份恢复或重新添加');return;}downloadBlob(a.name,blob);}catch(e){toast('附件读取失败：'+e.message);}}
 function downloadBlob(name,blob){const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),30000);}
 function blobDataURL(blob){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(r.error);r.readAsDataURL(blob);});}
 async function makeBackup(){
@@ -1173,7 +1231,7 @@ function todoRow(t,opt){
   return `<li class="todo-row ${t.done?'is-done':''}">
     <button class="check" data-act="toggle-todo" data-id="${t.id}" aria-label="切换完成">${OKMARK}</button>
     <div class="todo-main" data-act="open-todo" data-id="${t.id}">
-      <div class="todo-title">${esc(t.title)}</div>
+      <div class="todo-title">${esc(t.title)}</div>${checklistProgress(t)}
       ${meta.length?`<div class="todo-meta">${meta.join('')}${over?'<span class="tag-chip">已逾期</span>':''}</div>`:''}
     </div>
     <div class="todo-side">
@@ -1365,7 +1423,7 @@ function doneRow(t){
   return `<li class="todo-row is-done">
     <button class="check" data-act="toggle-todo" data-id="${t.id}">${OKMARK}</button>
     <div class="todo-main" data-act="open-todo" data-id="${t.id}">
-      <div class="todo-title">${esc(t.title)}</div>
+      <div class="todo-title">${esc(t.title)}</div>${checklistProgress(t)}
       <div class="todo-meta">${t.date?`<span class="tag-chip">${I.cal}${relDay(t.date)}</span>`:''}<span class="tag-chip">完成于 ${fmtTime(t.doneAt)}</span></div>
     </div><div class="todo-side">${todoMenu(t)}</div>
   </li>`;
@@ -1911,7 +1969,7 @@ function renderMe(){
         <div data-act="open-cloud">${row('cloud','账号与同步',cloudDesc,chev)}</div>
       </div>
       <div class="me-group">
-        <div class="mg-title">数据</div>
+        <div class="mg-title">数据与计划</div><div data-act="attachment-panel">${row('cloud','附件跨设备同步','查看上传状态、重试和首次启用说明',chev)}</div><div data-act="weekly-review">${row('cal','每周回顾与下周安排','完成、延期与新增笔记；勾选生成下周待办',chev)}</div>
         <div data-act="export" data-kind="backup">${row('db','数据备份','导出正文与本机附件，不包含 API Key',chev)}</div>
         <div data-act="import-backup">${row('db','恢复备份','先预览，再恢复；自动保留当前数据快照',chev)}</div>
         <div data-act="export" data-kind="md">${row('download','导出笔记为 Markdown','全部笔记合并为 .md 文件',chev)}</div>
@@ -1943,7 +2001,7 @@ function renderMe(){
       </div>
       <div class="me-group">
         <div class="mg-title">其他</div>
-        <div data-act="about">${row('info','关于知行记','版本 V2.1 · 通知与自动邮件修复',chev)}</div>
+        <div data-act="about">${row('info','关于知行记','版本 V3 · 附件同步、每周安排与子任务',chev)}</div>
         <div data-act="feedback">${row('feedback','意见反馈', '把建议记录在本地',chev)}</div>
       </div>
     </div>`;
@@ -2068,9 +2126,9 @@ function openTodo(id){
           <div class="field" style="display:flex;flex-direction:column;flex:1;min-height:0">
             <label>备注</label><textarea class="big-note" id="mf-note" placeholder="补充说明……">${esc(t.note)}</textarea>
           </div>
-          <div class="field" style="margin-bottom:0"><label>附件</label>
+          ${checklistEditor(t)}<div class="field" style="margin-bottom:0"><label>附件</label>
             <div class="picked-files" id="mf-picked">${t.attachments.map(a=>pickedFileHtml(a,`<button data-act="del-attach" data-id="${t.id}" data-name="${esc(a.name)}" style="color:var(--muted);display:grid;place-items:center">${I.x}</button>`)).join('')}</div>
-            <label class="drop-zone" id="mf-drop">${I.upcloud}<div>点击或拖拽文件到此处上传</div><div class="dz-sub">单个文件不超过 20MB · 本机保存，完整备份可迁移，云同步仅同步清单</div><input type="file" id="mf-files" hidden multiple></label>
+            <label class="drop-zone" id="mf-drop">${I.upcloud}<div>点击或拖拽文件到此处上传</div><div class="dz-sub">单个文件不超过 20MB · 保存后自动上传（需启用附件云存储）</div><input type="file" id="mf-files" hidden multiple></label>
           </div>
         </div>
       </div>
@@ -2122,9 +2180,9 @@ function openNewTodo(presetDate){
           <div class="field" style="display:flex;flex-direction:column;flex:1;min-height:0">
             <label>备注</label><textarea class="big-note" id="nt-note" placeholder="补充说明..."></textarea>
           </div>
-          <div class="field" style="margin-bottom:0"><label>附件</label>
+          ${checklistEditor({})}<div class="field" style="margin-bottom:0"><label>附件</label>
             <div class="picked-files" id="nt-picked"></div>
-            <label class="drop-zone" id="nt-drop">${I.upcloud}<div>点击或拖拽文件到此处上传</div><div class="dz-sub">单个文件不超过 20MB · 本机保存，完整备份可迁移，云同步仅同步清单</div><input type="file" id="nt-files" hidden multiple></label>
+            <label class="drop-zone" id="nt-drop">${I.upcloud}<div>点击或拖拽文件到此处上传</div><div class="dz-sub">单个文件不超过 20MB · 保存后自动上传（需启用附件云存储）</div><input type="file" id="nt-files" hidden multiple></label>
           </div>
         </div>
       </div>
@@ -2248,6 +2306,9 @@ document.addEventListener('click',e=>{
     case 'notify-test': testNotification();break;
     case 'import-backup': chooseBackup();break;
     case 'download-attachment': downloadAttachment(d.file);break;
+    case 'upload-attachment': uploadAttachment(d.file);break;
+    case 'attachment-panel': attachmentPanel();break;
+    case 'weekly-review': openWeekly();break;
     case 'note-del-file': {flushEditor();const n=noteById(ui.editingNote);n.attachments=n.attachments.filter(a=>(a.id||a.name)!==d.file);persist();renderNotes();break;}
     case 'resolve-cloud': resolveCloudConflict(d.choice);break;
     case 'nav': go(d.to); break;
@@ -2415,7 +2476,7 @@ function collectNtForm(){
     repeat:$('#nt-repeat').value,
     reminder:($('#nt-reminder').value||'').replace('T',' ')||null,
     note:$('#nt-note').value,
-    attachments:ui.ntFiles.slice()
+    attachments:ui.ntFiles.slice(),checklist:readChecklist()
   }};
 }
 function confirmNewTodo(){
@@ -2435,7 +2496,7 @@ function spawnNextOccurrence(t){
   else next=addDays(t.date,t.repeat==='daily'?1:7);
   const exists=[...DB.todos,...DB.trash.todos.map(x=>x.item)].some(x=>x.seriesId===series&&x.date===next);
   if(exists)return;
-  const child=JSON.parse(JSON.stringify(t));child.id=uid();child.done=false;child.doneAt=null;child.date=next;child.createdAt=Date.now();child.linkedNoteId=null;
+  const child=JSON.parse(JSON.stringify(t));child.id=uid();child.done=false;child.doneAt=null;child.date=next;child.createdAt=Date.now();child.linkedNoteId=null;child.checklist=(t.checklist||[]).map(x=>({title:x.title,done:false}));child.dateChanges=[];delete child.weeklySource;
   for(const k of Object.keys(child))if(k.startsWith('_'))delete child[k];
   if(t.reminder){const days=Math.round((pdate(next)-pdate(t.date))/86400000);child.reminder=addDays(t.reminder.slice(0,10),days)+' '+hm(t.reminder);}
   DB.todos.push(child);
@@ -2451,7 +2512,7 @@ function reopenMiniMenu(id){ // 重绘后同步重新展开指定待办的快捷
 }
 function postpone(id,day,date,keep){
   const t=byId(id);if(!t)return;
-  t.date=date!=null?date:addDays(T,day);
+  recordDateChange(t,t.date,date!=null?date:addDays(T,day));t.date=date!=null?date:addDays(T,day);
   persist();toast(`已改期到 ${relDay(t.date)}${t.time?' '+t.time:''}`);
   if(!keep)document.querySelectorAll('details.mini-menu[open]').forEach(x=>x.open=false);
   rerenderCurrent();
@@ -2473,7 +2534,7 @@ function batchSchedule(day){
   const targets=DB.todos.filter(t=>!t.done&&!t.date&&catOk(t)&&matchTodoQ(t));
   if(!targets.length){toast('没有可安排的事项');return;}
   const d=addDays(T,day);
-  targets.forEach(t=>t.date=d);
+  targets.forEach(t=>{recordDateChange(t,t.date,d);t.date=d;});
   persist();toast(`已把 ${targets.length} 项安排到${day?'明天':'今天'}`);
   ui.todoTab=day?'upcoming':'today';renderTodos();
 }
@@ -2491,7 +2552,7 @@ function applyTodoForm(id){
   const t=byId(id);
   t.title=$('#mf-title').value.trim()||t.title;
   t.cat=$('#mf-cat').value;
-  const dl=$('#mf-dl').value;
+  const dl=$('#mf-dl').value;recordDateChange(t,t.date,dl?dl.slice(0,10):null);
   t.date=dl?dl.slice(0,10):null;
   t.time=$('#mf-date-only')?.checked?null:(dl&&dl.length>10?dl.slice(11,16):null);
   const rv=$('#mf-reminder').value;t.reminder=rv?rv.replace('T',' '):null;
@@ -2499,7 +2560,7 @@ function applyTodoForm(id){
   const pb=document.querySelector('.pri-seg button.active[data-prefix="mf"]');
   t.priority=pb?pb.dataset.v:'mid';
   t.tags=parseTags($('#mf-tags').value);
-  t.note=$('#mf-note').value;
+  t.note=$('#mf-note').value;t.checklist=readChecklist();
   return t;
 }
 function saveTodo(id){
@@ -3115,7 +3176,7 @@ function openCloudModal(){
         <div class="cl-acc"><span class="cl-dot on"></span><b>${esc(c.session.email||'已登录账号')}</b></div>
         <div class="cl-sub">同步状态：${cloudStateText(c.status==='idle'?'ok':c.status)} · 设备 ${c.device}</div>
         <div class="cl-sub">上次上传 ${fmtSyncTime(c.lastPushAt)} · 上次拉取 ${fmtSyncTime(c.lastPullAt)}</div>
-        <div class="cl-sub">离线修改保存在本机；并发修改需选择保留版本，不会静默覆盖。附件本体仅在本机，迁移请使用完整备份。</div>
+        <div class="cl-sub">离线修改保存在本机；并发修改需选择保留版本，不会静默覆盖。附件支持私有云存储；首次使用请到「我的 → 附件跨设备同步」初始化。</div>
       </div>`:`
       <div class="cl-login-box">
         <div class="field" style="margin-bottom:10px"><label>邮箱</label><input type="email" id="cl-email" placeholder="you@example.com"></div>
@@ -3182,7 +3243,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=l
 /* ============================================================
    十八、启动
    ============================================================ */
-initReliability();
+initReliability();initFeatures();
 renderChrome();
 $('#m-new-todo').addEventListener('click',()=>openNewTodo(T));
 $('#m-new-note').addEventListener('click',createNote);
