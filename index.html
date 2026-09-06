@@ -704,6 +704,24 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 .modal > .modal-foot{padding:0 22px 20px;flex-wrap:wrap;}
 .modal-body p{margin:0 0 10px;}
 .check-row{display:flex;gap:8px;align-items:center;margin:7px 0}.check-row input[type=text]{min-width:0;flex:1}.check-row input[type=checkbox],.weekly-item input{width:18px!important;flex:none}.check-progress{display:flex;gap:8px;align-items:center;color:var(--muted)}.check-progress progress{width:90px;height:8px}.weekly-item{display:flex;gap:10px;align-items:center;margin:12px 0;overflow-wrap:anywhere}.modal-body h4{margin:16px 0 8px}.pf-l{flex-wrap:wrap}.modal-body{overflow-wrap:anywhere}
+/* Keep attachment names inside the existing modal columns. */
+.picked-files .attach-file{min-width:0;max-width:100%;align-items:flex-start;gap:10px;}
+.picked-files .pf-l{display:grid;grid-template-columns:15px minmax(0,1fr) auto;gap:3px 7px;flex:1;min-width:0;}
+.picked-files .pf-l>svg{grid-column:1;grid-row:1;align-self:center;flex-shrink:0;}
+.picked-files .pf-l>[data-act="download-attachment"]{grid-column:2 / 4;grid-row:1;display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;line-height:22px;}
+.picked-files .pf-l>small{grid-column:2;grid-row:2;font-size:12px;line-height:20px;}
+.picked-files .pf-l>[data-act="upload-attachment"]{grid-column:3;grid-row:2;justify-self:end;font-size:12px;line-height:18px;}
+.picked-files .pf-l>span{grid-column:2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.picked-files .attach-file>span:last-child{flex:none;white-space:nowrap;line-height:22px;}
+.picked-files .sz{white-space:nowrap;}
+.picked-files{max-height:200px;overflow-y:auto;overflow-x:hidden;}
+.picked-files:not(:empty)+.drop-zone{padding:8px 10px;gap:2px;}
+.picked-files:not(:empty)+.drop-zone>svg{display:none;}
+.picked-files:not(:empty)+.drop-zone .dz-sub{font-size:11.5px;}
+.picked-files .pf-l>.btn-text{padding:0;}
+.todo-modal .big-note{min-height:220px;resize:vertical;}
+@media(max-width:760px){.todo-modal .big-note{min-height:180px;}}
+
 </style>
 </head>
 <body>
@@ -760,7 +778,7 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 const attachmentTransfers=new Map();
 let attachmentScanBusy=false;
 function attachmentStatus(a){const s=attachmentTransfers.get(a.id);return s?.busy?'上传中':s?.error?'仅本机 · 上传失败':a.cloudFile?'已同步':'仅本机';}
-function attachmentLink(a){return a.id?`<button class="btn-text" data-act="download-attachment" data-file="${esc(a.id)}">${esc(a.name)}</button><small data-file-status="${esc(a.id)}">${attachmentStatus(a)}</small><button class="btn-text" data-act="upload-attachment" data-file="${esc(a.id)}">${a.cloudFile?'检查同步':'上传 / 重试'}</button>`:`<span>${esc(a.name)} <small>仅文件名，需重新添加原文件</small></span>`;}
+function attachmentLink(a){return a.id?`<button class="btn-text" data-act="download-attachment" data-file="${esc(a.id)}" title="${esc(a.name)}">${esc(a.name)}</button><small data-file-status="${esc(a.id)}">${attachmentStatus(a)}</small><button class="btn-text" data-act="upload-attachment" data-file="${esc(a.id)}">${a.cloudFile?'检查同步':'上传 / 重试'}</button>`:`<span>${esc(a.name)} <small>仅文件名，需重新添加原文件</small></span>`;}
 function refreshAttachmentStatus(){document.querySelectorAll('[data-file-status]').forEach(el=>{const a=allAttachments().find(a=>a.id===el.dataset.fileStatus);if(a){el.textContent=attachmentStatus(a);el.title=attachmentTransfers.get(a.id)?.error||'';}});}
 async function attachmentContext(){const c=loadCloud(),epoch=cloudEpoch;if(storageBlocked||!c.enabled||!c.session||!c.bound||c.lastUid!==c.session.uid||c.status==='conflict')throw Error('请先登录并完成账号数据同步，处理版本冲突');if(!await ensureToken()||!cloudSessionMatches(c,epoch))throw Error('登录已变化，请重试');return {c:loadCloud(),epoch};}
 function storageObjectURL(c,path,download=false){return cloudBase(c)+'/storage/v1/object/'+(download?'authenticated/':'')+'zxj-files/'+path.split('/').map(encodeURIComponent).join('/');}

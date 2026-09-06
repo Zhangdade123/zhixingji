@@ -1,0 +1,17 @@
+/* Keep attachment names inside the existing modal columns. */
+.picked-files .attach-file{min-width:0;max-width:100%;align-items:flex-start;gap:10px;}
+.picked-files .pf-l{display:grid;grid-template-columns:15px minmax(0,1fr) auto;gap:3px 7px;flex:1;min-width:0;}
+.picked-files .pf-l>svg{grid-column:1;grid-row:1;align-self:center;flex-shrink:0;}
+.picked-files .pf-l>[data-act="download-attachment"]{grid-column:2 / 4;grid-row:1;display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;line-height:22px;}
+.picked-files .pf-l>small{grid-column:2;grid-row:2;font-size:12px;line-height:20px;}
+.picked-files .pf-l>[data-act="upload-attachment"]{grid-column:3;grid-row:2;justify-self:end;font-size:12px;line-height:18px;}
+.picked-files .pf-l>span{grid-column:2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.picked-files .attach-file>span:last-child{flex:none;white-space:nowrap;line-height:22px;}
+.picked-files .sz{white-space:nowrap;}
+.picked-files{max-height:200px;overflow-y:auto;overflow-x:hidden;}
+.picked-files:not(:empty)+.drop-zone{padding:8px 10px;gap:2px;}
+.picked-files:not(:empty)+.drop-zone>svg{display:none;}
+.picked-files:not(:empty)+.drop-zone .dz-sub{font-size:11.5px;}
+.picked-files .pf-l>.btn-text{padding:0;}
+.todo-modal .big-note{min-height:220px;resize:vertical;}
+@media(max-width:760px){.todo-modal .big-note{min-height:180px;}}
