@@ -722,6 +722,32 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 .todo-modal .big-note{min-height:220px;resize:vertical;}
 @media(max-width:760px){.todo-modal .big-note{min-height:180px;}}
 
+@media(max-width:760px){
+  .modal-mask{top:var(--viewport-top,0px);bottom:auto;height:var(--visible-height,100dvh);padding:0;align-items:flex-end;}
+  .modal{max-height:100%;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;}
+  .todo-modal,.cloud-modal{height:100%;max-height:100%;border-radius:0;}
+  .modal-head{padding:16px 18px 12px;padding-top:max(16px,env(safe-area-inset-top));border-bottom:1px solid var(--divider);}
+  .modal-body{padding:16px 18px 20px;}
+  .modal input:not([type=checkbox]),.modal select,.modal textarea{font-size:16px;max-width:100%;}
+  .modal .form-grid{display:flex;flex-direction:column;gap:20px;}
+  .modal .form-right .big-note{min-height:180px;}
+  .modal-foot{flex-wrap:wrap;padding-bottom:max(16px,env(safe-area-inset-bottom));}
+  .modal-foot .mf-l,.modal-foot .mf-r{flex-wrap:wrap;gap:8px;}
+  .modal .btn{min-height:44px;}
+  .cloud-modal .modal-foot{padding:16px 18px;}
+  .cloud-modal .cl-acc{overflow-wrap:anywhere;}
+  .cloud-modal .field input{display:block;width:100%;min-height:46px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#fff;color:var(--ink);box-sizing:border-box;}
+  .cloud-modal .field label{display:block;margin-bottom:8px;}
+  .cloud-modal .modal-foot .mf-r{width:100%;display:grid;grid-template-columns:1fr 1fr;}
+  .cloud-modal .modal-foot .mf-r>[data-act="close-modal"]{display:none;}
+  .cloud-modal [data-act="cl-signin"]{background:var(--accent);color:#fff;}
+  .cloud-modal [data-act="cl-signup"]{background:var(--divider);color:var(--ink);}
+  .me-row{padding:16px 12px;}.me-row .mt{min-width:0;}.me-row .m2{line-height:1.6;}
+  .editor-toolbar{flex-wrap:nowrap;overflow-x:auto;}.editor-toolbar>*{flex-shrink:0;}
+  .editor-body{font-size:16px;line-height:1.8;min-height:45vh;}
+  .mobile-bottom{padding-bottom:env(safe-area-inset-bottom);}
+}
+
 </style>
 <link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icon-192.png"><meta name="theme-color" content="#28386c"><meta name="apple-mobile-web-app-capable" content="yes">
 </head>
@@ -775,6 +801,42 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 <div class="toast-root" id="toastRoot"></div>
 
 <script>
+const FIXED_CLOUD_URL='https://xpspmpgicjdtmmclzbuo.supabase.co';
+const FIXED_CLOUD_KEY='sb_publishable_s2T0ztl8_RDdI0lXUn70tw_JFuUej_Z';
+let tokenRefreshJob=null;
+async function ensureToken(){
+  if(tokenRefreshJob)return tokenRefreshJob;
+  const job=refreshCloudToken();tokenRefreshJob=job;
+  try{return await job;}finally{if(tokenRefreshJob===job)tokenRefreshJob=null;}
+}
+function syncErrorMessage(e){
+  if(e.name==='AbortError'||e.name==='TimeoutError')return '连接超时，请保持页面打开并重试';
+  if(/load failed|failed to fetch|network|fetch failed/i.test(e.message||''))return navigator.onLine===false?'当前离线，本机内容已保留，联网后重试':'网络请求未完成，请检查手机网络或切换 Wi-Fi/蜂窝网络后重试';
+  return e.message||'同步未完成';
+}
+async function storeCloudRecovery(){
+  // Preserve the data snapshot; attachment blobs remain in the same IndexedDB.
+  // Avoid base64 expansion and Safari download navigation during cloud selection.
+  const data=businessSnapshot();const snapshot={format:'zhixingji-recovery',savedAt:Date.now(),data};
+  await blobPut('cloud-recovery',new Blob([JSON.stringify(snapshot)],{type:'application/json'}));
+}
+function offerBackupFile(name,blob,message='备份已生成，请保存到「文件」或下载。'){
+  const file=new File([blob],name,{type:'application/json'});
+  $('#modalMask').innerHTML=`<div class="modal backup-modal"><div class="modal-head"><h3>保存备份</h3><button data-act="close-modal">关闭</button></div><div class="modal-body"><p>${esc(message)}</p><p>${esc(name)} · ${fmtSize(blob.size)}</p><button class="btn btn-primary" id="backup-share">保存到文件 / 分享</button> <button class="btn" id="backup-download">下载备份</button><p id="backup-status" role="status"></p></div></div>`;$('#modalMask').classList.add('show');
+  const share=$('#backup-share');share.hidden=!navigator.canShare?.({files:[file]});
+  share.onclick=async()=>{try{await navigator.share({files:[file],title:'知行记备份'});}catch(e){if(e.name!=='AbortError'&&$('#backup-status'))$('#backup-status').textContent='分享未完成，请尝试下载备份';}};
+  $('#backup-download').onclick=()=>downloadBlob(name,blob);
+}
+async function exportCloudRecovery(){
+  try{const blob=await blobGet('cloud-recovery');if(!blob)throw Error('尚无切换前快照');const saved=JSON.parse(await blob.text());
+    const data=migrate(saved.data),backup=await makeBackup(data);offerBackupFile('知行记-切换云端前备份.json',new Blob([JSON.stringify(backup)],{type:'application/json'}),'这是最近一次切换云端前保存在此设备的快照。'+(backup.missingFiles.length?'部分原附件不在本机，详见备份清单。':''));
+  }catch(e){toast('导出失败：'+syncErrorMessage(e));}
+}
+function initMobileSync(){
+  const update=()=>{const v=window.visualViewport;document.documentElement.style.setProperty('--visible-height',(v?.height||innerHeight)+'px');document.documentElement.style.setProperty('--viewport-top',(v?.offsetTop||0)+'px');};
+  update();window.visualViewport?.addEventListener('resize',update);window.visualViewport?.addEventListener('scroll',update);
+}
+
 async function pilotAPI(action,extra={}){
   const c=loadCloud();if(!c.session)throw Error('请先在「账号与同步」登录');
   if(!await ensureToken())throw Error('登录已失效，请重新登录');
@@ -923,12 +985,12 @@ async function blobGet(id){const db=await blobDB();return new Promise((res,rej)=
 function allAttachments(d=DB){return [...d.todos,...d.notes,...d.trash.todos.map(x=>x.item),...d.trash.notes.map(x=>x.item)].flatMap(r=>r.attachments||[]);}
 function downloadBlob(name,blob){const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),30000);}
 function blobDataURL(blob){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(r.error);r.readAsDataURL(blob);});}
-async function makeBackup(){
-  const data=JSON.parse(JSON.stringify(DB));const files={},missing=[];
+async function makeBackup(source=DB){
+  const data=JSON.parse(JSON.stringify(source));const files={},missing=[];
   for(const a of allAttachments(data)){if(!a.id){missing.push(a.name);continue;}if(files[a.id])continue;const blob=await blobGet(a.id);if(blob)files[a.id]=await blobDataURL(blob);else missing.push(a.name);}
   return {format:'zhixingji-backup',version:2,exportedAt:new Date().toISOString(),data,files,missingFiles:[...new Set(missing)]};
 }
-async function exportBackup(){try{if(fileJobs){toast('附件保存中，请稍后导出');return;}const b=await makeBackup();download('知行记-完整备份-'+T+'.json',JSON.stringify(b), 'application/json');toast(b.missingFiles.length?'备份已导出；有 '+b.missingFiles.length+' 个原文件缺失，详见备份清单':'完整备份已导出（不含 API Key）');}catch(e){showStorageError('备份失败：'+e.message);}}
+async function exportBackup(){try{if(fileJobs){toast('附件保存中，请稍后导出');return;}const b=await makeBackup();offerBackupFile('知行记-完整备份-'+T+'.json',new Blob([JSON.stringify(b)],{type:'application/json'}),b.missingFiles.length?'备份已生成；有 '+b.missingFiles.length+' 个原文件不在本机，详见清单':'完整备份已生成（不含 API Key）');}catch(e){showStorageError('备份失败：'+e.message);}}
 function chooseBackup(){const input=document.createElement('input');input.type='file';input.accept='.json,application/json';input.onchange=async()=>{
   const f=input.files[0];if(!f)return;
   try{if(f.size>250*1048576)throw Error('备份超过 250MB，请分拆后恢复');const raw=JSON.parse(await f.text()),data=raw.format==='zhixingji-backup'?raw.data:raw;
@@ -2016,7 +2078,7 @@ function renderMe(){
       </div>
       <div class="me-group">
         <div class="mg-title">数据与计划</div><div data-act="push-pilot">${row('bell','iPhone 后台提醒实验','添加到主屏幕，预约关闭应用后的通知测试',chev)}</div><div data-act="attachment-panel">${row('cloud','附件跨设备同步','查看上传状态、重试和首次启用说明',chev)}</div><div data-act="weekly-review">${row('cal','每周回顾与下周安排','完成、延期与新增笔记；勾选生成下周待办',chev)}</div>
-        <div data-act="export" data-kind="backup">${row('db','数据备份','导出正文与本机附件，不包含 API Key',chev)}</div>
+        <div data-act="cloud-recovery">${row('db','导出切换前快照','最近一次选择云端前，在此设备保存的内容',chev)}</div><div data-act="export" data-kind="backup">${row('db','数据备份','导出正文与本机附件，不包含 API Key',chev)}</div>
         <div data-act="import-backup">${row('db','恢复备份','先预览，再恢复；自动保留当前数据快照',chev)}</div>
         <div data-act="export" data-kind="md">${row('download','导出笔记为 Markdown','全部笔记合并为 .md 文件',chev)}</div>
         <div data-act="export" data-kind="csv">${row('download','导出待办为 CSV','可用 Excel / WPS 打开',chev)}</div>
@@ -2356,6 +2418,7 @@ document.addEventListener('click',e=>{
     case 'attachment-panel': attachmentPanel();break;
     case 'weekly-review': openWeekly();break;
     case 'push-pilot': openPushPilot();break;
+    case 'cloud-recovery': exportCloudRecovery();break;
     case 'note-del-file': {flushEditor();const n=noteById(ui.editingNote);n.attachments=n.attachments.filter(a=>(a.id||a.name)!==d.file);persist();renderNotes();break;}
     case 'resolve-cloud': resolveCloudConflict(d.choice);break;
     case 'nav': go(d.to); break;
@@ -3047,7 +3110,7 @@ const CLOUD_STORE='zhixingji-cloud';
 const CLOUD_SQL="-- 知行记 V2 同步表。执行前导出数据；脚本遇到无归属旧行会停止，不会删除它们。\nbegin;\ncreate table if not exists public.zxj_sync (\n  id text not null,\n  user_id uuid not null references auth.users(id) on delete cascade,\n  data jsonb not null,\n  rev bigint not null default 0,\n  device text,\n  updated_at timestamptz not null default now(),\n  primary key(id,user_id)\n);\nalter table public.zxj_sync add column if not exists user_id uuid references auth.users(id) on delete cascade;\ndo $migration$\nbegin\n  if exists(select 1 from public.zxj_sync where user_id is null) then\n    raise exception '存在无账号归属的历史数据。请先导出并明确每行所属账号，再迁移；本脚本未删除任何历史数据。';\n  end if;\nend;\n$migration$;\nalter table public.zxj_sync alter column user_id set not null;\nalter table public.zxj_sync drop constraint if exists zxj_sync_pkey;\nalter table public.zxj_sync add constraint zxj_sync_pkey primary key(id,user_id);\nalter table public.zxj_sync enable row level security;\ndrop policy if exists \"zxj anon all\" on public.zxj_sync;\ndrop policy if exists \"zxj owner all\" on public.zxj_sync;\ncreate policy \"zxj owner all\" on public.zxj_sync for all to authenticated\nusing (auth.uid()=user_id) with check(auth.uid()=user_id);\nrevoke all on public.zxj_sync from anon;\ngrant select,insert,update,delete on public.zxj_sync to authenticated;\nnotify pgrst, 'reload schema';\ncommit;\n";
 function loadCloud(){
   const def={url:'https://xpspmpgicjdtmmclzbuo.supabase.co',key:'sb_publishable_s2T0ztl8_RDdI0lXUn70tw_JFuUej_Z',enabled:false,device:devId(),bound:false,session:null,lastUid:null,lastPushAt:0,lastPullAt:0,remoteRev:0,status:'idle'};
-  try{return Object.assign(def,JSON.parse(localStorage.getItem(CLOUD_STORE)||'{}'));}
+  try{return Object.assign(def,JSON.parse(localStorage.getItem(CLOUD_STORE)||'{}'),{url:FIXED_CLOUD_URL,key:FIXED_CLOUD_KEY});}
   catch(e){return def;}
 }
 function cloudLoggedIn(){const c=loadCloud();return !!(c.session&&c.session.access_token&&c.session.uid);}
@@ -3080,7 +3143,7 @@ async function sbSignUp(email,pwd){
   saveSession(j);return {confirm:false};
 }
 async function sbSignIn(email,pwd){const j=await sbAuth('token?grant_type=password',{email,password:pwd});saveSession(j);return j;}
-async function ensureToken(){
+async function refreshCloudToken(){
   const c=loadCloud(),epoch=cloudEpoch;if(!c.session)return false;
   if(c.session.expires_at&&c.session.expires_at-Date.now()>60000)return true;
   if(!c.session.refresh_token)return false;
@@ -3103,7 +3166,11 @@ function scheduleCloudPush(){
 }
 function setCloudStatus(s){const c=loadCloud();c.status=s;saveCloud(c);const el=$('#cloud-state');if(el)el.textContent=cloudStateText(s);}
 function cloudStateText(s){return ({conflict:'存在版本冲突，请处理',idle:'已配置，待同步',pushing:'正在上传…',pulling:'正在同步…',ok:'已同步',error:'同步失败',off:'未启用'})[s]||s;}
-async function cloudFetch(url,options={}){const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),20000);try{const r=await fetch(url,{...options,signal:ctrl.signal});if(!r.ok)throw Error('HTTP '+r.status);return r;}finally{clearTimeout(timer);}}
+async function cloudFetch(url,options={}){
+  const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),25000);
+  try{const r=await fetch(url,{...options,signal:ctrl.signal});if(!r.ok)throw Error(r.status===401?'登录凭据已失效，请重新登录':r.status===403?'云端权限不足，请检查账号与数据库授权':'云端返回 HTTP '+r.status);return r;}
+  catch(e){throw Error(syncErrorMessage(e));}finally{clearTimeout(timer);}
+}
 function cloudTableURL(c){return cloudBase(c)+'/rest/v1/zxj_sync?id=eq.main&user_id=eq.'+encodeURIComponent(c.session.uid);}
 function cloudSessionMatches(c,epoch){const latest=loadCloud();return cloudEpoch===epoch&&latest.enabled&&latest.session?.uid===c.session?.uid&&cloudBase(latest)===cloudBase(c);}
 function localDirty(c){return !!c.dirty||(DB._rev||0)>(c.remoteRev||0);}
@@ -3121,7 +3188,7 @@ function applyCloudRow(remote,c){
 function showCloudConflict(remote,c,force=false){
   cloudConflict={remote,uid:c.session.uid,epoch:cloudEpoch};setCloudStatus('conflict');
   if(!force&&($('#modalMask').classList.contains('show')||currentRoute()==='notes'))return;
-  $('#modalMask').innerHTML=`<div class="modal" role="dialog" aria-modal="true" tabindex="-1"><div class="modal-head"><h3>发现不同的数据版本</h3></div><div class="modal-body"><p>本机和云端都可能有修改，自动同步已暂停。选择前会下载本机完整备份；不会自动合并或静默覆盖。</p><p>本机：${DB.todos.length} 条待办、${DB.notes.length} 条笔记。云端：${remote.data?.todos?.length||0} 条待办、${remote.data?.notes?.length||0} 条笔记。</p></div><div class="modal-foot"><button class="btn" data-act="close-modal">稍后处理</button><button class="btn" data-act="resolve-cloud" data-choice="remote">备份本机，采用云端</button><button class="btn btn-primary" data-act="resolve-cloud" data-choice="local">备份双方，保留本机</button></div></div>`;$('#modalMask').classList.add('show');
+  $('#modalMask').innerHTML=`<div class="modal" role="dialog" aria-modal="true" tabindex="-1"><div class="modal-head"><h3>发现不同的数据版本</h3></div><div class="modal-body"><p>本机和云端都可能有修改，自动同步已暂停。可以先保存本机快照，再选择保留哪个版本。</p><p>本机：${DB.todos.length} 条待办、${DB.notes.length} 条笔记。云端：${remote.data?.todos?.length||0} 条待办、${remote.data?.notes?.length||0} 条笔记。</p><label style="display:flex;gap:10px;align-items:center"><input type="checkbox" id="cloud-keep-backup" checked> 先备份本机内容（仅保存于此设备）</label><p style="margin-top:12px">取消勾选后采用云端，将覆盖未同步的本机修改，不生成本次恢复快照。</p></div><div class="modal-foot"><button class="btn" data-act="close-modal">稍后处理</button><button class="btn" data-act="resolve-cloud" data-choice="remote">采用云端版本</button><button class="btn btn-primary" data-act="resolve-cloud" data-choice="local">保留本机版本</button></div></div>`;$('#modalMask').classList.add('show');
 }
 async function writeCloud(c,expected,epoch){
   if(storageBlocked||!cloudSessionMatches(c,epoch))return;
@@ -3184,19 +3251,24 @@ async function initializeEmptyAccount(){
 async function pushCloud(){return syncCloud();}
 async function pullCloud(){return syncCloud();}
 function markCloudErr(msg){setCloudStatus('error');if(Date.now()-cloudErrToastAt>15000){cloudErrToastAt=Date.now();toast('云同步未完成：'+msg+'；本机内容已保留');}}
-function startCloudLoop(){if(cloudLoopTimer)clearInterval(cloudLoopTimer);syncCloud();cloudLoopTimer=setInterval(syncCloud,25000);}
+function startCloudLoop(){if(cloudLoopTimer)clearInterval(cloudLoopTimer);syncCloud();cloudLoopTimer=setInterval(()=>{if(!document.hidden&&navigator.onLine!==false)syncCloud();},25000);}
 async function resolveCloudConflict(choice){
-  const conflict=cloudConflict,c=loadCloud();if(!conflict||conflict.uid!==c.session?.uid||cloudBusy)return;
+  const conflict=cloudConflict;let c=loadCloud();if(!conflict||conflict.uid!==c.session?.uid||cloudBusy)return;
   cloudBusy=true;
   try{
-    flushEditor();const rev=DB._rev;const backup=await makeBackup();download('知行记-冲突前本机备份.json',JSON.stringify(backup),'application/json');
+    flushEditor();const rev=DB._rev;
+    if(!await ensureToken())throw Error('登录已过期，请重新登录再选择云端');c=loadCloud();
+    if(!cloudSessionMatches(c,conflict.epoch))throw Error('账号已切换，请重新同步');
+    const keepBackup=document.querySelector('#cloud-keep-backup')?.checked!==false;
+    if(keepBackup)await storeCloudRecovery();
     const remote=await fetchCloudRow(c);if(!cloudSessionMatches(c,conflict.epoch)||!remote)throw Error('会话或云端数据已变化，请重新同步');
     if(DB._rev!==rev)throw Error('备份期间本机又有修改，请重试');
     if(Number(remote.rev)!==Number(conflict.remote.rev)){cloudConflict={...conflict,remote};throw Error('云端又有更新，请关闭弹窗并重新同步后选择');}
     if(choice==='remote'){closeModal();applyCloudRow(remote,c);}
-    else{download('知行记-冲突前云端数据.json',JSON.stringify(remote.data),'application/json');await writeCloud(c,Number(remote.rev)||0,conflict.epoch);if(loadCloud().status!=='conflict')closeModal();}
-    cloudConflict=null;
-  }catch(e){toast(e.message);}finally{cloudBusy=false;}
+    else{if(keepBackup)await blobPut('cloud-recovery-remote',new Blob([JSON.stringify(remote.data)],{type:'application/json'}));await writeCloud(c,Number(remote.rev)||0,conflict.epoch);if(loadCloud().status!=='conflict')closeModal();}
+    if(cloudConflict===conflict)cloudConflict=null;
+    if(!cloudConflict)toast(keepBackup?'同步已完成；切换前快照可在「我的」导出':'同步已完成，本次未创建切换前快照');
+  }catch(e){toast(syncErrorMessage(e));}finally{cloudBusy=false;}
 }
 
 function fmtSyncTime(ts){if(!ts)return '尚未';const d=new Date(ts);return d.getMonth()+1+'月'+d.getDate()+'日 '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
@@ -3211,13 +3283,7 @@ function openCloudModal(){
   mask.innerHTML=`<div role="dialog" aria-modal="true" tabindex="-1" class="modal cloud-modal">
     <div class="modal-head"><h3>账号与云同步</h3><button class="icon-x" data-act="close-modal">${I.x}</button></div>
     <div class="modal-body">
-      <div class="cl-steps">
-        <div class="cl-step"><b>1</b><span>到 supabase.com 免费新建一个项目，并在 SQL Editor 执行一次下方建表语句</span></div>
-        <div class="cl-step"><b>2</b><span>把项目 Project URL 与 anon public 密钥填到下面（所有账号共用这一个云项目）</span></div>
-        <div class="cl-step"><b>3</b><span>用邮箱注册并登录；每个账号只能看到自己的数据，互不影响，多台设备登录同一账号即同步</span></div>
-      </div>
-      <div class="field"><label>项目地址 Project URL</label><input type="text" id="cl-url" placeholder="https://xxxxxxxx.supabase.co" value="${esc(c.url)}" ${logged?'disabled':''}></div>
-      <div class="field"><label>anon public 密钥（Settings → API）</label><input type="password" id="cl-key" placeholder="eyJhbGci……" value="${esc(c.key)}" ${logged?'disabled':''}></div>
+      <p class="cl-sub">使用同一邮箱登录，即可同步电脑和手机的内容。</p>
       ${logged?`
       <div class="cl-login-box">
         <div class="cl-acc"><span class="cl-dot on"></span><b>${esc(c.session.email||'已登录账号')}</b></div>
@@ -3226,13 +3292,11 @@ function openCloudModal(){
         <div class="cl-sub">离线修改保存在本机；并发修改需选择保留版本，不会静默覆盖。附件支持私有云存储；首次使用请到「我的 → 附件跨设备同步」初始化。</div>
       </div>`:`
       <div class="cl-login-box">
-        <div class="field" style="margin-bottom:10px"><label>邮箱</label><input type="email" id="cl-email" placeholder="you@example.com"></div>
-        <div class="field"><label>密码（至少 6 位）</label><input type="password" id="cl-pwd" placeholder="设置/输入登录密码"></div>
-        <div class="cl-sub">项目地址与密钥已内置，一般无需填写；直接输入邮箱和密码，已有账号点「登录账号」，首次使用点「注册账号」。<button class="btn-text" data-act="cl-resend" style="font-size:13.5px;padding:2px 4px">重发确认邮件</button></div>
+        <div class="field" style="margin-bottom:10px"><label>邮箱</label><input type="email" id="cl-email" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="you@example.com"></div>
+        <div class="field"><label>密码（至少 6 位）</label><input type="password" id="cl-pwd" name="password" autocomplete="current-password" placeholder="设置/输入登录密码"></div>
+        <div class="cl-sub">已有账号请登录，首次使用请注册。<button class="btn-text" data-act="cl-resend" style="font-size:13.5px;padding:2px 4px">重发确认邮件</button></div>
       </div>`}
-      <div class="field"><label>建表语句（SQL Editor 执行一次）<button class="btn-text" data-act="cl-copy-sql" style="float:right;font-size:13.5px">复制 SQL</button></label>
-        <textarea class="cl-sql" id="cl-sql" readonly>${CLOUD_SQL}</textarea>
-      </div>
+
     </div>
     <div class="modal-foot">
       <div class="mf-l">${logged?'<button class="btn btn-ghost" data-act="cl-sync-now">立即同步</button><button class="btn btn-ghost" data-act="cl-resolve">处理版本冲突</button><button class="btn btn-ghost" data-act="cl-logout">退出登录</button>':''}</div>
@@ -3244,12 +3308,7 @@ function openCloudModal(){
   </div>`;
   mask.classList.add('show');
 }
-function saveProjectCfg(){ // 仅保存云项目地址/密钥，不代表登录
-  const url=($('#cl-url').value||'').trim(),key=($('#cl-key').value||'').trim();
-  if(!/^https?:\/\//.test(url)){toast('请填写以 http 开头的项目地址');return false;}
-  if(!key){toast('请填写 anon public 密钥');return false;}
-  const c=loadCloud();c.url=url;c.key=key;saveCloud(c);return true;
-}
+function saveProjectCfg(){return saveCloud(loadCloud());}
 function friendlyAuthErr(msg){
   const m=String(msg||'').toLowerCase();
   if(m.includes('not confirmed')||m.includes('email_not_confirmed'))return '该邮箱还没点确认链接：请到邮箱（含垃圾邮件）点确认，或点「重发确认邮件」';
@@ -3270,7 +3329,7 @@ async function cloudAuth(kind){
       if(r.confirm){toast('注册成功，需先到邮箱点确认链接，再点登录账号');return;}
       toast('注册成功，已登录并开始同步');
     }else{await sbSignIn(email,pwd);toast('登录成功，正在同步…');}
-    openCloudModal();renderMe();startCloudLoop();
+    closeModal();renderMe();startCloudLoop();
   }catch(e){toast((kind==='signup'?'注册':'登录')+'失败：'+friendlyAuthErr(e.message));}
   }finally{authBusy=false;}
 }
@@ -3290,7 +3349,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=l
 /* ============================================================
    十八、启动
    ============================================================ */
-initReliability();initFeatures();
+initReliability();initFeatures();initMobileSync();
 renderChrome();
 $('#m-new-todo').addEventListener('click',()=>openNewTodo(T));
 $('#m-new-note').addEventListener('click',createNote);
