@@ -697,6 +697,10 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
   .fp-stats{gap:18px;}
   .quick-note{min-height:0;}
 }
+.brand{text-align:center;}
+.nav-item{position:relative;justify-content:center;padding-left:42px;padding-right:42px;text-align:center;}
+.nav-item svg{position:absolute;left:calc(50% - 48px);}
+.sidebar-foot{justify-content:center;text-align:center;flex-wrap:wrap;}
 .modal > .modal-foot{padding:0 22px 20px;flex-wrap:wrap;}
 .modal-body p{margin:0 0 10px;}
 </style>
@@ -849,6 +853,7 @@ function applyDevicePreferences(){let prefs;try{prefs=JSON.parse(safeGet('zhixin
 function businessSnapshot(){const d=JSON.parse(JSON.stringify(DB));delete d.settings.notify;delete d.settings.systemNotify;for(const t of d.todos){for(const k of Object.keys(t))if(/^_(remind|dueNotif|snooze)/.test(k))delete t[k];}return d;}
 function refreshDay(){const next=businessToday();if(next===T)return;const old=T;T=next;if(ui.calSelected===old){ui.calSelected=T;ui.calMonth=T.slice(0,7);}if(!$('#modalMask').classList.contains('show')&&currentRoute()!=='notes')rerenderCurrent();}
 function initReliability(){
+  initMailAutomation();initNotificationWorker();
   applyDevicePreferences();if(bootLoadError)showStorageError('读取失败：'+bootLoadError+'。原始数据未被覆盖。');
   else persist(false);
   window.addEventListener('pagehide',flushEditor);
@@ -1897,7 +1902,7 @@ function renderMe(){
   const cloudDesc=cc.session?('已登录 '+cc.session.email+' · '+cloudStateText(cc.status==='idle'?'ok':cc.status)):'邮箱注册登录后，数据按账号在多设备自动同步';
   const row=(icon,t1,t2,right)=>`<div class="me-row"><span class="mi">${I[icon]}</span><span class="mt"><div class="m1">${t1}</div>${t2?`<div class="m2">${esc(t2)}</div>`:''}</span>${right}</div>`;
   const chev=`<span class="chev">${I.chevR}</span>`;
-  const sw=(key)=>`<button class="switch ${st[key]?'on':''}" data-act="switch" data-key="${key}" role="switch" aria-checked="${!!st[key]}" aria-label="${({notify:'网页内提醒',systemNotify:'系统通知',doneSound:'提示音',mailOn:'邮件提醒'})[key]||key}"></button>`;
+  const sw=(key)=>`<button class="switch ${(key==='mailOn'?mailAutoEnabled():st[key])?'on':''}" data-act="switch" data-key="${key}" role="switch" aria-checked="${key==='mailOn'?mailAutoEnabled():!!st[key]}" aria-label="${({notify:'网页内提醒',systemNotify:'系统通知',doneSound:'提示音',mailOn:'邮件提醒'})[key]||key}"></button>`;
   $('#view-me').innerHTML=`
     <div class="page-head"><div><h1>我的</h1><div class="sub">账号、同步、数据与偏好</div></div></div>
     <div class="me-groups">
@@ -1927,7 +1932,8 @@ function renderMe(){
         ${row('bell','网页内提醒','网页打开时检查；关闭页面或设备休眠时无法准点提醒',sw('notify'))}
         ${row('bell','Windows / 系统通知','此设备独立授权；拒绝后仍保留网页内提醒',sw('systemNotify'))}
         <div data-act="notify-diagnostics">${row('bell','通知诊断与测试','检查权限、提醒记录与失败原因',chev)}</div>
-        ${row('mail','重要事项邮件提醒','需部署新版后端邮件任务并同步；网页不再自动发信',sw('mailOn'))}
+        ${row('mail','重要事项邮件提醒',mailModeDescription(),sw('mailOn'))}
+        <div data-act="mail-diagnostics">${row('mail','自动邮件状态与记录','查看是否就绪、到期检查和发送结果',chev)}</div>
         <div data-act="open-mail-cfg">${row('mail','邮件发送设置',mailReady()?'已配置 · 收件：'+mailTo():'配置 EmailJS 发送通道与收件邮箱（默认登录账号）',chev)}</div>
         <div class="me-row"><span class="mi">${I.palette}</span><span class="mt"><div class="m1">外观设置</div><div class="m2">浅色 · 深蓝导航（更多主题后续开放）</div></span></div>
         <div class="me-row"><span class="mi">${I.home}</span><span class="mt"><div class="m1">默认打开页面</div></span>
@@ -1937,7 +1943,7 @@ function renderMe(){
       </div>
       <div class="me-group">
         <div class="mg-title">其他</div>
-        <div data-act="about">${row('info','关于知行记','版本 V2 · 可靠性与数据恢复升级',chev)}</div>
+        <div data-act="about">${row('info','关于知行记','版本 V2.1 · 通知与自动邮件修复',chev)}</div>
         <div data-act="feedback">${row('feedback','意见反馈', '把建议记录在本地',chev)}</div>
       </div>
     </div>`;
@@ -2238,6 +2244,7 @@ document.addEventListener('click',e=>{
   if(act!=='toggle-todo')document.querySelectorAll('details.mini-menu[open]').forEach(x=>{if(!x.contains(el))x.open=false;});
   switch(act){
     case 'notify-diagnostics': openNotifyDiagnostics();break;
+    case 'mail-diagnostics': openMailDiagnostics();break;
     case 'notify-test': testNotification();break;
     case 'import-backup': chooseBackup();break;
     case 'download-attachment': downloadAttachment(d.file);break;
@@ -2569,9 +2576,10 @@ function purgeItem(kind,id){
 async function toggleSetting(key){
   if(key==='systemNotify'){
     if(DB.settings.systemNotify)DB.settings.systemNotify=false;
-    else{const p=await requestSystemPermission();DB.settings.systemNotify=p==='granted';if(p!=='granted')toast('系统通知未获授权，网页内提醒仍可使用');}
-  }else DB.settings[key]=!DB.settings[key];
-  saveDevicePreferences();persist();renderMe();checkReminders();
+    else{const p=await requestSystemPermission();DB.settings.systemNotify=p==='granted';if(p!=='granted')toast('系统通知未获授权，网页内提醒仍可使用');else await prepareNotificationWorker();}
+  }else if(key==='mailOn')setMailAutoEnabled(!mailAutoEnabled());
+  else DB.settings[key]=!DB.settings[key];
+  saveDevicePreferences();persist();renderMe();checkReminders();checkMails();
 }
 function rerenderCurrent(){({home:renderHome,todos:renderTodos,notes:renderNotes,calendar:renderCalendar,review:renderReview,summary:renderSummary,me:renderMe,trash:renderTrash})[currentRoute()]();}
 
@@ -2581,8 +2589,8 @@ function openMailCfg(){
   $('#modalMask').innerHTML=`<div class="modal" style="max-width:580px">
     <div class="modal-head"><h3>邮件发送设置</h3><button class="icon-x" data-act="close-modal">${I.x}</button></div>
     <div class="modal-body">
-      <div class="cl-sub" style="margin-bottom:12px;line-height:1.6">高优先级（重要）事项会在<b>提醒时间</b>与<b>截止时间</b>各发一封邮件。网页本身不能直接发信，需一个免费的 <b>EmailJS</b> 通道（emailjs.com 注册，具体额度以 EmailJS 账户套餐为准）：①「Email Services」添加一个邮箱服务，复制 <b>Service ID</b>；②「Email Templates」新建模板，正文保留 <b>{{to_email}}、{{subject}}、{{message}}</b> 三个变量，复制 <b>Template ID</b>；③「Account → General」复制 <b>Public Key</b>。</div>
-      <div class="field"><label>Service ID</label><input type="text" id="mc-service" value="${esc(m.serviceId||'')}" placeholder="如 service_xxxxxx"></div>
+      <div class="cl-sub" style="margin-bottom:12px;line-height:1.6">高优先级（重要）事项会在<b>提醒时间</b>与<b>截止时间</b>各发一封邮件。自动邮件可选择网页模式或后端模式，两者都使用 <b>EmailJS</b> 通道（emailjs.com 注册，具体额度以 EmailJS 账户套餐为准）：①「Email Services」添加一个邮箱服务，复制 <b>Service ID</b>；②「Email Templates」新建模板，正文保留 <b>{{to_email}}、{{subject}}、{{message}}</b> 三个变量，复制 <b>Template ID</b>；③「Account → General」复制 <b>Public Key</b>。</div>
+      <div class="field"><label>自动发送模式</label><select id="mc-mode"><option value="browser" ${mailAutoCfg()?.mode!=='backend'?'selected':''}>网页自动发送（此设备，页面需保持打开）</option><option value="backend" ${mailAutoCfg()?.mode==='backend'?'selected':''}>后端定时发送（需已部署 Supabase SQL）</option></select><p class="cl-sub">网页模式会关闭并同步旧后端开关后再开始发送，避免同时启用两条通道。只发送此设备开启后到期的高优先级事项。</p></div><div class="field"><label>Service ID</label><input type="text" id="mc-service" value="${esc(m.serviceId||'')}" placeholder="如 service_xxxxxx"></div>
       <div class="field"><label>Template ID</label><input type="text" id="mc-template" value="${esc(m.templateId||'')}" placeholder="如 template_xxxxxx"></div>
       <div class="field"><label>Public Key</label><input type="text" id="mc-key" value="${esc(m.publicKey||'')}" placeholder="EmailJS 账号的 Public Key"></div>
       <div class="field"><label>收件邮箱（留空则发到登录账号邮箱${acc?'：'+acc:'，未登录时请填写'}）</label><input type="email" id="mc-to" value="${esc(m.to||'')}" placeholder="${acc||'you@example.com'}"></div>
@@ -2595,6 +2603,7 @@ function openMailCfg(){
 }
 function saveMailCfg(){
   const g=id=>($('#'+id)?.value||'').trim();
+  setMailMode(g('mc-mode')||'browser');
   DB.settings.mail={serviceId:g('mc-service'),templateId:g('mc-template'),publicKey:g('mc-key'),to:g('mc-to')};
   persist();renderMe();return DB.settings.mail;
 }
@@ -2722,6 +2731,23 @@ function catRename(id,val){
    ============================================================ */
 let reminderTimer=null,remindShowing=false,activeReminderKey=null,lastReminderCheck=0;
 let ledgerScope='',reminderLedger={};
+let notificationWorker=null,notificationWorkerPending=null,notificationWorkerError='',reminderScanBusy=false;
+const liveNotifications=new Map();
+let notificationLastResult={};
+function prepareNotificationWorker(){
+  if(notificationWorker)return Promise.resolve(notificationWorker);
+  if(notificationWorkerPending)return notificationWorkerPending;
+  if(!('serviceWorker'in navigator)||!isSecureContext||location.protocol==='file:')return Promise.resolve(null);
+  notificationWorkerPending=(async()=>{try{
+    const registration=await navigator.serviceWorker.register(new URL('./sw.js',location.href),{scope:new URL('./',location.href).pathname,updateViaCache:'none'});
+    if(!registration.active)await Promise.race([navigator.serviceWorker.ready,new Promise((_,reject)=>setTimeout(()=>reject(Error('通知服务启动超时')),6000))]);
+    if(!registration.active)throw Error('通知服务尚未激活');notificationWorker=registration;notificationWorkerError='';return registration;
+  }catch(e){notificationWorkerError=e.message;return null;}finally{notificationWorkerPending=null;}})();return notificationWorkerPending;
+}
+function initNotificationWorker(){
+  if('Notification'in window&&Notification.permission==='granted')prepareNotificationWorker();
+  navigator.serviceWorker?.addEventListener('message',e=>{if(e.data?.type==='open-reminder-todo'&&e.data.id)openTodo(e.data.id);});
+}
 function ledgerKey(){return 'zhixingji-reminders-v2-'+(loadCloud().session?.uid||'local');}
 function loadReminderLedger(){const scope=ledgerKey();if(scope!==ledgerScope){ledgerScope=scope;try{reminderLedger=JSON.parse(safeGet(scope)||'{}');}catch(e){reminderLedger={};}activeReminderKey=null;remindShowing=false;$('#remindLayer').classList.remove('show');}return reminderLedger;}
 function saveReminderLedger(){try{localStorage.setItem(ledgerScope||ledgerKey(),JSON.stringify(reminderLedger));return true;}catch(e){showStorageError('提醒记录保存失败：'+e.message);return false;}}
@@ -2730,15 +2756,28 @@ async function requestSystemPermission(){
   try{return Notification.permission==='default'?await Notification.requestPermission():Notification.permission;}catch(e){toast('通知授权失败：'+e.message);return 'error';}
 }
 function askNotifyPermission(cb){requestSystemPermission().then(cb);}
-function fireSystemNote(t,kind,entry){
+async function fireSystemNote(t,kind,entry,channel='auto'){
   if(!DB.settings.systemNotify||!('Notification'in window)||Notification.permission!=='granted')return false;
+  const title=kind==='due'?'知行记 · 截止提醒':'知行记 · 事项提醒';
+  const tag='zxj-'+(entry?.key||t.id),options={body:t.title,tag,requireInteraction:true,silent:false,data:{todoId:t.id==='test'?null:t.id}};
   try{
-    const n=new Notification(kind==='due'?'知行记 · 截止提醒':'知行记 · 事项提醒',{body:t.title,tag:'zxj-'+(entry?.key||t.id),requireInteraction:true});
+    const registration=channel==='native'?null:(notificationWorker||await(notificationWorkerPending||Promise.resolve(null)));
+    if(registration){
+      await registration.showNotification(title,options);
+      if(entry){entry.system='created';entry.channel='persistent';entry.error='';entry.createdAt=Date.now();}
+      notificationLastResult={channel:'持久系统通知',status:'浏览器已接受',at:Date.now()};
+      return true;
+    }
+    if(channel==='persistent')throw Error(notificationWorkerError||'持久通知通道未就绪');
+    const n=new Notification(title,options);liveNotifications.set(tag,n);
     n.onclick=()=>{window.focus();openTodo(t.id);n.close();};
-    n.onerror=()=>{if(entry){entry.system='failed';entry.error='浏览器报告通知展示失败';entry.retryAt=Date.now()+60000;saveReminderLedger();}};
+    n.onshow=()=>{notificationLastResult={channel:'页面系统通知',status:'收到浏览器展示事件',at:Date.now()};};
+    n.onclose=()=>liveNotifications.delete(tag);
+    n.onerror=()=>{liveNotifications.delete(tag);notificationLastResult={channel:'页面系统通知',status:'浏览器报告展示失败',at:Date.now()};if(entry){entry.system='failed';entry.error='浏览器报告通知展示失败';entry.retryAt=Date.now()+60000;saveReminderLedger();}};
     if(entry){entry.system='created';entry.error='';entry.createdAt=Date.now();}
+    notificationLastResult={channel:'页面系统通知',status:'已创建，尚未确认 Windows 横幅',at:Date.now()};
     return true;
-  }catch(e){if(entry){entry.system='failed';entry.error=e.message;entry.attempts=(entry.attempts||0)+1;entry.retryAt=Date.now()+Math.min(300000,15000*2**entry.attempts);}return false;}
+  }catch(e){notificationLastResult={channel,status:e.message,at:Date.now()};if(entry){entry.system='failed';entry.error=e.message;entry.attempts=(entry.attempts||0)+1;entry.retryAt=Date.now()+Math.min(300000,15000*2**entry.attempts);}return false;}
 }
 function currentReminderEvents(t){
   const events=[];if(t.done)return events;
@@ -2746,19 +2785,24 @@ function currentReminderEvents(t){
   if(t.date){const ts=todoDueStamp(t);if(Number.isFinite(ts))events.push({kind:'due',ts,value:t.date+' '+(t.time||'09:00')});}
   return events.map(e=>({...e,key:t.id+'|'+e.kind+'|'+e.value,id:t.id}));
 }
-function checkReminders(){
+async function checkReminders(){
+  if(reminderScanBusy)return;reminderScanBusy=true;
+  try{
   refreshDay();lastReminderCheck=Date.now();loadReminderLedger();
   if(storageBlocked||!(DB.settings.notify||DB.settings.systemNotify))return;
+  const scope=ledgerScope;
   const now=Date.now(),valid=new Set();
   for(const t of DB.todos){for(const event of currentReminderEvents(t)){
     valid.add(event.key);if(event.ts>now)continue;
     let entry=reminderLedger[event.key];
     if(!entry)entry=reminderLedger[event.key]={...event,ack:false,system:'pending',attempts:0};
     if(entry.ack||entry.snoozeUntil>now)continue;
-    if(entry.system!=='created'&&(!entry.retryAt||entry.retryAt<=now))fireSystemNote(t,event.kind,entry);
+    if(entry.system!=='created'&&(!entry.retryAt||entry.retryAt<=now))await fireSystemNote(t,event.kind,entry);
+    if(scope!==ledgerKey())return;
   }}
   for(const key of Object.keys(reminderLedger)){const entry=reminderLedger[key];if(!valid.has(key)||(entry.ack&&entry.ts<now-90*86400000))delete reminderLedger[key];}
   saveReminderLedger();showNextReminder();
+  }finally{reminderScanBusy=false;}
 }
 function showNextReminder(){
   if(remindShowing||!DB.settings.notify||document.visibilityState==='hidden')return;
@@ -2771,18 +2815,23 @@ function showNextReminder(){
 }
 function closeReminderCard(ack=true){if(activeReminderKey&&reminderLedger[activeReminderKey]&&ack){reminderLedger[activeReminderKey].ack=true;saveReminderLedger();}$('#remindLayer').classList.remove('show');$('#remindLayer').innerHTML='';activeReminderKey=null;remindShowing=false;setTimeout(showNextReminder,150);}
 function snoozeReminder(id,kind){const entry=reminderLedger[activeReminderKey];if(entry){entry.snoozeUntil=Date.now()+600000;entry.system='pending';entry.retryAt=entry.snoozeUntil;entry.attempts=0;entry.ack=false;saveReminderLedger();}closeReminderCard(false);toast('已延后 10 分钟，网页打开时再次提醒');}
-function startReminderLoop(){if(reminderTimer)clearInterval(reminderTimer);checkReminders();reminderTimer=setInterval(checkReminders,15000);}
+function startReminderLoop(){if(reminderTimer)clearInterval(reminderTimer);checkReminders();checkMails();reminderTimer=setInterval(()=>{checkReminders();checkMails();},15000);}
 function openNotifyDiagnostics(){
   loadReminderLedger();const pending=Object.values(reminderLedger).filter(e=>!e.ack),failed=pending.filter(e=>e.system==='failed');
-  $('#modalMask').innerHTML=`<div class="modal" role="dialog" aria-modal="true" tabindex="-1"><div class="modal-head"><h3>通知诊断与测试</h3><button class="icon-x" data-act="close-modal">${I.x}</button></div><div class="modal-body"><p>网页打开时每 15 秒检查。关闭页面或设备休眠后不会定时唤醒；后台可能延迟。所有事项时间按北京时间解释。</p><p>安全上下文：${window.isSecureContext?'是':'否'} · 协议：${esc(location.protocol)}</p><p>系统通知 API：${'Notification'in window?'可用':'不可用'} · 权限：${esc('Notification'in window?Notification.permission:'不支持')}</p><p>网页提醒：${DB.settings.notify?'开启':'关闭'} · 系统通知：${DB.settings.systemNotify?'开启':'关闭'}</p><p>上次检查：${lastReminderCheck?new Date(lastReminderCheck).toLocaleString():'尚未'}<br>未确认：${pending.length} · 系统通知失败：${failed.length}</p>${failed.slice(-3).map(e=>`<p>${esc(byId(e.id)?.title||'事项')}：${esc(e.error)}</p>`).join('')}<p>浏览器接受请求不代表你已看到 Windows 横幅。请检查 Windows 的通知开关、浏览器横幅和勿扰模式。</p><p id="notify-test-result" role="status"></p></div><div class="modal-foot"><button class="btn" id="retry-notifications">重试失败通知</button><button class="btn btn-primary" data-act="notify-test">授权并发送测试通知</button></div></div>`;
+  $('#modalMask').innerHTML=`<div class="modal" role="dialog" aria-modal="true" tabindex="-1"><div class="modal-head"><h3>通知诊断与测试</h3><button class="icon-x" data-act="close-modal">${I.x}</button></div><div class="modal-body"><p>网页打开时每 15 秒检查。持久通知改善系统通道，但不会在关闭网页后自动定时唤醒。所有事项按北京时间计算。</p><p>安全上下文：${window.isSecureContext?'是':'否'} · 协议：${esc(location.protocol)}</p><p>权限：<b>${esc('Notification'in window?Notification.permission:'不支持')}</b> · 系统通知开关：<b>${DB.settings.systemNotify?'开启':'关闭'}</b><br>网页内提醒：${DB.settings.notify?'开启':'关闭'}</p><p>持久通知通道：${notificationWorker?'已就绪':notificationWorkerPending?'正在启动':esc(notificationWorkerError||'点击测试时初始化')}</p><p>上次检查：${lastReminderCheck?new Date(lastReminderCheck).toLocaleString():'尚未'}<br>未确认：${pending.length} · 失败：${failed.length}</p>${failed.slice(-3).map(e=>`<p>${esc(byId(e.id)?.title||'事项')}：${esc(e.error)}</p>`).join('')}<p>最近通道结果：${esc(notificationLastResult.channel||'尚未测试')} · ${esc(notificationLastResult.status||'')}</p><p><b>granted 只代表网站已获授权，不能证明 Windows 横幅已开启。</b>若两种测试都没有横幅，请到 Windows“系统 → 通知”打开总开关及 Edge/Chrome 的“显示通知横幅”，关闭“勿扰/专注”；同时检查通知中心。</p><p><a href="ms-settings:notifications">打开 Windows 通知设置</a></p><p id="notify-test-result" role="status"></p><div style="display:flex;gap:12px;flex-wrap:wrap"><button class="btn" id="notify-seen">我看到了通知</button><button class="btn" id="notify-unseen">仍未看到</button></div></div><div class="modal-foot"><button class="btn" id="retry-notifications">重试失败通知</button><button class="btn" id="test-native-notification">测试页面系统通道</button><button class="btn btn-primary" data-act="notify-test">测试持久系统通知</button></div></div>`;
   $('#modalMask').classList.add('show');$('#retry-notifications').onclick=()=>{for(const e of failed){e.retryAt=0;e.attempts=0;}saveReminderLedger();checkReminders();openNotifyDiagnostics();};
+  $('#test-native-notification').onclick=()=>testNotification('native');
+  $('#notify-seen').onclick=()=>{$('#notify-test-result').textContent='你已确认看到通知。接下来请创建未来两分钟到期的事项，保持网页打开验证定时触发。';};
+  $('#notify-unseen').onclick=()=>{$('#notify-test-result').textContent='已记录：未实际看到。请检查 Windows 通知中心、浏览器横幅和勿扰设置；网页无法读取或绕过这些系统开关。';};
 }
-async function testNotification(){
+async function testNotification(channel='auto'){
   const permission=await requestSystemPermission();const result=$('#notify-test-result');
   if(permission!=='granted'){if(result)result.textContent='未授权。请到浏览器站点权限中允许通知；网页内提醒仍可使用。';return;}
   DB.settings.systemNotify=true;saveDevicePreferences();
-  const test={key:'test-'+Date.now()};const ok=fireSystemNote({id:'test',title:'这是一条测试通知；看到横幅说明系统展示通道可用。'},'reminder',test);
-  if(result)result.textContent=ok?'已提交测试通知。请确认屏幕右下角或通知中心是否出现；若没有，检查 Windows 通知横幅与勿扰设置。':'发送失败：'+test.error;
+  if(result)result.textContent='正在初始化通知通道…';
+  if(channel!=='native')await prepareNotificationWorker();
+  const test={key:'test-'+Date.now()};const ok=await fireSystemNote({id:'test',title:'这是一条测试通知；看到横幅说明系统展示通道可用。'},'reminder',test,channel);
+  if(result)result.textContent=ok?'浏览器已接受'+(test.channel==='persistent'?'持久':'页面')+'通知请求。请用上方按钮确认是否实际看到横幅或通知中心记录。':'发送失败：'+test.error;
 }
 function taskStamp(value){return new Date(String(value).replace(' ','T')+(/(?:Z|[+-]\d\d:\d\d)$/.test(value)?'':'+08:00')).getTime();}
 
@@ -2795,21 +2844,88 @@ function mailTo(){
   const c=loadCloud();return (c.session&&c.session.email)||'';
 }
 let mailErrToastAt=0;
-async function sendMailX(subject,text){
-  if(!mailReady())return false;
-  const to=mailTo();
-  if(!to){const now=Date.now();if(now-mailErrToastAt>30000){mailErrToastAt=now;toast('邮件提醒：未找到收件邮箱（登录账号或在设置中填写）');}return false;}
-  const m=mailCfg();
-  try{
-    const r=await fetch('https://api.emailjs.com/api/v1.0/email/send',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({service_id:m.serviceId,template_id:m.templateId,user_id:m.publicKey,
-        template_params:{to_email:to,subject:subject,message:text,title:subject,to_name:to}})});
-    if(!r.ok){let d='';try{d=await r.text();}catch(e){}throw new Error('HTTP '+r.status+(d?'：'+d.slice(0,140):''));}
-    return true;
-  }catch(e){const now=Date.now();if(now-mailErrToastAt>30000){mailErrToastAt=now;toast('重要事项邮件发送失败：'+e.message+'（本地提醒不受影响）');}return false;}
-}
 function todoDueStamp(t){if(!t.date)return null;return taskStamp(t.date+' '+(t.time||'09:00'));}
-function checkMails(){} // 自动邮件由新版后端 outbox 独占处理，避免多设备重复发送。
+// Browser-mode email delivery. A separate flag keeps legacy backend jobs disabled.
+let mailScanBusy=false,lastMailCheck=0,mailLastError='';
+function mailAutoScope(){return 'zhixingji-mail-auto-v21-'+(loadCloud().session?.uid||'local');}
+function mailAutoCfg(){try{return JSON.parse(safeGet(mailAutoScope())||'null');}catch(e){return null;}}
+function putMailAuto(c){localStorage.setItem(mailAutoScope(),JSON.stringify(c));}
+function mailAutoEnabled(){const c=mailAutoCfg();return c?.mode==='browser'?!!c.enabled:!!DB.settings.mailOn;}
+function mailModeDescription(){const c=mailAutoCfg();return c?.mode==='browser'?'网页自动发送 · 仅此设备开启期间的高优先级到期事项':'后端定时发送 · 需已部署 Supabase 邮件任务';}
+function initMailAutomation(){
+  if(storageBlocked)return;let c=mailAutoCfg();
+  if(!c){c={mode:DB.settings.mailMode==='backend'?'backend':'browser',enabled:!!DB.settings.mailOn,startedAt:Date.now(),events:{},disabledBackendRev:0};
+    // Turning the old backend flag off is synchronized before browser mode sends.
+    if(c.mode==='browser'&&DB.settings.mailOn){DB.settings.mailOn=false;DB.settings.mailMode='browser';persist();c.disabledBackendRev=DB._rev;}
+    putMailAuto(c);
+  }
+}
+function setMailAutoEnabled(enabled){initMailAutomation();const c=mailAutoCfg();
+  if(c.mode==='browser'){c.enabled=enabled;if(enabled)c.startedAt=Date.now();if(DB.settings.mailOn){DB.settings.mailOn=false;persist();c.disabledBackendRev=DB._rev;}putMailAuto(c);}
+  else{DB.settings.mailOn=enabled;persist();}
+}
+function setMailMode(mode){
+  initMailAutomation();const c=mailAutoCfg();if(!['browser','backend'].includes(mode))return;
+  if(c.mode===mode){if(mode==='browser'&&DB.settings.mailOn){DB.settings.mailOn=false;DB.settings.mailMode='browser';persist();c.disabledBackendRev=DB._rev;putMailAuto(c);}return;}
+  const enabled=mailAutoEnabled();c.mode=mode;c.enabled=enabled;c.startedAt=Date.now();
+  DB.settings.mailOn=mode==='backend'&&enabled;DB.settings.mailMode=mode;persist();
+  c.disabledBackendRev=mode==='browser'?DB._rev:0;putMailAuto(c);
+}
+function mailAutomationReason(){
+  const c=mailAutoCfg();if(!c)return '正在初始化';
+  if(c.mode==='backend')return DB.settings.mailOn?'后端模式：网页不扫描，请确认 Supabase 任务执行日志':'邮件提醒关闭';
+  if(!c.enabled)return '此设备自动邮件未开启';
+  if(DB.settings.mailOn)return '云端邮件开关仍开启，请重新选择网页模式以避免双重发送';
+  if(!mailReady())return '发送通道或收件邮箱不完整';
+  const cloud=loadCloud();if(c.disabledBackendRev&&cloud.enabled&&(!cloud.bound||cloud.dirty||cloud.remoteRev<c.disabledBackendRev))return '等待关闭后端邮件的设置同步成功，暂缓网页发送';
+  return '';
+}
+async function sendMailResult(subject,message){
+  if(!mailReady())return {ok:false,retry:false,error:'缺少发送配置或收件邮箱'};
+  const m=mailCfg(),to=mailTo();
+  try{
+    const response=await fetch('https://api.emailjs.com/api/v1.0/email/send',{method:'POST',signal:AbortSignal.timeout(20000),headers:{'Content-Type':'application/json'},body:JSON.stringify({service_id:m.serviceId,template_id:m.templateId,user_id:m.publicKey,template_params:{to_email:to,to_name:to,subject,title:subject,message}})});
+    if(response.ok)return {ok:true};
+    const detail=(await response.text()).slice(0,180);
+    return {ok:false,retry:response.status===429,unknown:response.status>=500,error:'HTTP '+response.status+' '+detail};
+  }catch(e){return {ok:false,retry:false,unknown:true,error:'发送结果不确定：'+e.message};}
+}
+async function sendMailX(subject,message){const r=await sendMailResult(subject,message);if(!r.ok){mailLastError=r.error;toast('邮件未确认发送：'+r.error);}return r.ok;}
+async function checkMails(){
+  if(mailScanBusy||storageBlocked)return;lastMailCheck=Date.now();initMailAutomation();if(mailAutomationReason())return;
+  mailScanBusy=true;const scope=mailAutoScope();
+  const run=async()=>{
+    if(scope!==mailAutoScope()||mailAutomationReason())return;
+    const c=mailAutoCfg(),now=Date.now();c.events=c.events||{};
+    let candidate;
+    for(const t of DB.todos){if(t.done||t.priority!=='high')continue;
+      for(const event of currentReminderEvents(t)){
+        if(event.ts>now||event.ts<c.startedAt)continue;
+        if((event.kind==='due'?t._mailDueSent:t._mailRemindSent)===event.value)continue;
+        const old=c.events[event.key];if(old&&(!['retry'].includes(old.state)||old.nextAt>now))continue;
+        candidate={t,event};break;
+      }if(candidate)break;
+    }
+    if(!candidate)return;
+    const {t,event}=candidate,previous=c.events[event.key];
+    const record={state:'sending',attempts:(previous?.attempts||0)+1,at:now,title:t.title,kind:event.kind};
+    c.events[event.key]=record;putMailAuto(c);
+    const result=await sendMailResult('【知行记·'+(event.kind==='due'?'截止':'提醒')+'】'+t.title,'事项「'+t.title+'」已到'+(event.kind==='due'?'截止':'提醒')+'时间：'+event.value+'（北京时间）。请及时处理。');
+    // Write back into the captured account scope, never into a newly signed-in account.
+    const latest=JSON.parse(safeGet(scope)||'{}');latest.events=latest.events||{};
+    latest.events[event.key]={...record,state:result.ok?'accepted':result.unknown?'unknown':result.retry&&record.attempts<5?'retry':'failed',error:result.error||'',nextAt:Date.now()+Math.min(300000,30000*2**record.attempts)};
+    localStorage.setItem(scope,JSON.stringify(latest));
+    if(result.ok&&scope===mailAutoScope()&&byId(t.id)===t){t[event.kind==='due'?'_mailDueSent':'_mailRemindSent']=event.value;persist();}
+    if(!result.ok){mailLastError=result.error;toast('自动邮件未确认发送，请查看邮件发送记录');}
+  };
+  try{if(navigator.locks)await navigator.locks.request(scope,{ifAvailable:true},lock=>lock?run():undefined);else await run();}
+  catch(e){mailLastError=e.message;}finally{mailScanBusy=false;}
+}
+function openMailDiagnostics(){
+  initMailAutomation();const c=mailAutoCfg(),entries=Object.values(c.events||{}).sort((a,b)=>b.at-a.at).slice(0,10);
+  const labels={sending:'发送中／刷新前结果待核验',accepted:'邮件服务已接受',retry:'限流后等待重试',unknown:'结果不确定，请先核验邮箱',failed:'失败，需检查配置'};
+  $('#modalMask').innerHTML=`<div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><h3>自动邮件状态</h3><button class="icon-x" data-act="close-modal">${I.x}</button></div><div class="modal-body"><p>${esc(mailModeDescription())}</p><p>状态：${esc(mailAutomationReason()||'已就绪，等待高优先级事项到期')}</p><p>上次检查：${lastMailCheck?new Date(lastMailCheck).toLocaleString():'尚未'}<br>收件邮箱：${esc(mailTo()||'未配置')}</p><p>网页模式仅发送此设备开启之后到期的事项，不批量补发历史逾期；请只在一个设备启用。关闭网页后需使用已部署的后端模式。</p>${entries.map(e=>`<p><b>${esc(e.title)}</b>：${labels[e.state]||esc(e.state)}${e.error?'<br>'+esc(e.error):''}</p>`).join('')||'<p>暂无自动发送记录。请新建一个未来两分钟到期、高优先级、未完成的测试事项。</p>'}${mailLastError?'<p>'+esc(mailLastError)+'</p>':''}</div><div class="modal-foot"><button class="btn" id="mail-check-now">立即检查到期事项</button><button class="btn btn-primary" data-act="open-mail-cfg">发送模式与设置</button></div></div>`;$('#modalMask').classList.add('show');$('#mail-check-now').onclick=async()=>{await checkMails();openMailDiagnostics();};
+}
 
 /* ============================================================
    十七·六、云数据库自动同步（Supabase / 兼容 PostgREST 的云库）
@@ -3072,6 +3188,7 @@ $('#m-new-todo').addEventListener('click',()=>openNewTodo(T));
 $('#m-new-note').addEventListener('click',createNote);
 // 默认打开页（设置 hash 会触发已绑定的 hashchange → renderRoute）
 if(location.hash){renderRoute();}else{location.hash='#/'+DB.settings.defaultPage;}
+const linkedTodo=new URLSearchParams(location.hash.split('?')[1]||'').get('todo');if(linkedTodo)openTodo(linkedTodo);
 // 通知巡检驻留：开关打开即启动，是否真正推送由 checkReminders 按权限门控（授权后无需刷新即生效）
 startReminderLoop();
 // 云同步：已登录账号则启动拉取/定时同步
