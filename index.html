@@ -1406,7 +1406,7 @@ function renderChrome(){
    七、视图：首页
    ============================================================ */
 function renderHome(){
-  const todayTodos=DB.todos.filter(t=>t.date===T&&!t.done&&tState(t)!=='overdue').sort((x,y)=>(y.time||'00:00').localeCompare(x.time||'00:00')||y.createdAt-x.createdAt);
+  const todayTodos=DB.todos.filter(t=>t.date===T&&!t.done&&tState(t)!=='overdue').sort((x,y)=>(x.time||'24:00').localeCompare(y.time||'24:00')||(x.createdAt||0)-(y.createdAt||0));
   const doneToday=DB.todos.filter(t=>t.done&&t.doneAt&&dstr(new Date(t.doneAt))===T);
   const overdueAll=DB.todos.filter(t=>tState(t)==='overdue').sort((x,y)=>(y.date+' '+(y.time||'')).localeCompare(x.date+' '+(x.time||'')));
   const ovP=pagedSlice('home-overdue',overdueAll,3);
