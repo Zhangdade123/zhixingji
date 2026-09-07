@@ -3440,8 +3440,17 @@ renderChrome();
 $('#m-new-todo').addEventListener('click',()=>openNewTodo(T));
 $('#m-new-note').addEventListener('click',createNote);
 // 默认打开页（设置 hash 会触发已绑定的 hashchange → renderRoute）
+// Older installed icons retain #/me even after the manifest is updated.
+const startupParams=new URLSearchParams(location.hash.split('?')[1]||'');
+const linkedTodo=startupParams.get('todo');
+const installedApp=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+if(installedApp&&location.hash==='#/me'){
+  const preferred=['home','todos','notes','calendar'].includes(DB.settings.defaultPage)?DB.settings.defaultPage:'home';
+  history.replaceState(null,'',location.pathname+location.search+'#/'+preferred);
+}
 if(location.hash){renderRoute();}else{location.hash='#/'+DB.settings.defaultPage;}
-const linkedTodo=new URLSearchParams(location.hash.split('?')[1]||'').get('todo');if(linkedTodo)openTodo(linkedTodo);
+if(linkedTodo)openTodo(linkedTodo);
+
 // 通知巡检驻留：开关打开即启动，是否真正推送由 checkReminders 按权限门控（授权后无需刷新即生效）
 startReminderLoop();
 // 云同步：已登录账号则启动拉取/定时同步

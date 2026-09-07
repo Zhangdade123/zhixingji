@@ -13,7 +13,7 @@ self.addEventListener('notificationclick',event=>{
   const id=event.notification.data?.todoId;
   event.notification.close();
   event.waitUntil((async()=>{
-    const url=new URL('./',self.registration.scope);url.hash=event.notification.data?.pilot?'/me':'/todos'+(id?'?todo='+encodeURIComponent(id):'');
+    const url=new URL('./',self.registration.scope);url.hash=event.notification.data?.pilot?'/me?notification=pilot':'/todos'+(id?'?todo='+encodeURIComponent(id):'');
     const windows=await self.clients.matchAll({type:'window',includeUncontrolled:true});
     for(const client of windows){if(client.url.startsWith(self.registration.scope)){if(event.notification.data?.pilot)await client.navigate(url.href);await client.focus();client.postMessage({type:'open-reminder-todo',id});return;}}
     await self.clients.openWindow(url.href);
