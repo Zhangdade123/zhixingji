@@ -1,6 +1,6 @@
 -- 知行记 V2 邮件 outbox。需先有 public.zxj_sync。
 -- 仅在用户部署本脚本后启用；网页不会自动执行 SQL。
--- 前端 V2 不自动发送邮件，以此队列为唯一调度者。
+-- 网页选择后端模式后，以此队列为唯一调度者。
 -- 服务接受不等于收件箱实际送达；不确定的请求不自动重发，避免重复邮件。
 begin;
 create extension if not exists pg_cron;
@@ -67,7 +67,8 @@ begin
           occurrence:=replace(ev.value,'T',' ');
           if occurrence is null or occurrence !~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$' then continue; end if;
           stamp:=occurrence::timestamp at time zone 'Asia/Shanghai';
-          if stamp>now() then continue; end if;
+          -- 部署/恢复任务时不补发历史逾期；与网页的 5 分钟窗口一致。
+          if stamp>now() or stamp<now()-interval '5 minutes' then continue; end if;
           insert into zxj_private.mail_outbox(user_id,todo_id,kind,occurrence,due_at,state,error)
           values(s.user_id,t->>'id',ev.kind,occurrence,stamp,
             case when replace(ev.legacy,'T',' ')=occurrence then 'accepted' else 'pending' end,
@@ -82,6 +83,8 @@ begin
     end loop;
   end loop;
 
+  update zxj_private.mail_outbox set state='cancelled',error='已超过 5 分钟发送窗口，不补发历史邮件',updated_at=now()
+    where state='pending' and due_at<now()-interval '5 minutes';
   -- 限速：每次扫描最多处理 1 封，避开 EmailJS 并发/每秒发送限制。
   for q in select * from zxj_private.mail_outbox where state='pending' and retry_at<=now()
     order by due_at limit 1 for update skip locked loop
