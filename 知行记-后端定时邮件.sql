@@ -31,7 +31,7 @@ create or replace function zxj_private.scan_and_mail()
 returns void language plpgsql security definer set search_path='' as $body$
 declare
   s record; t jsonb; ev record; q record; cfg jsonb; recipient text;
-  stamp timestamptz; occurrence text; response record; req bigint;
+  stamp timestamptz; v_occurrence text; response record; req bigint;
 begin
   -- 同一事务只允许一个扫描器运行。
   if not pg_try_advisory_xact_lock(7729148201) then return; end if;
@@ -64,15 +64,15 @@ begin
         for ev in select 'reminder'::text as kind,t->>'reminder' as value,t->>'_mailRemindSent' as legacy
           union all select 'due',(t->>'date')||' '||coalesce(nullif(t->>'time',''),'09:00'),t->>'_mailDueSent'
         loop
-          occurrence:=replace(ev.value,'T',' ');
-          if occurrence is null or occurrence !~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$' then continue; end if;
-          stamp:=occurrence::timestamp at time zone 'Asia/Shanghai';
+          v_occurrence:=replace(ev.value,'T',' ');
+          if v_occurrence is null or v_occurrence !~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$' then continue; end if;
+          stamp:=v_occurrence::timestamp at time zone 'Asia/Shanghai';
           -- 部署/恢复任务时不补发历史逾期；与网页的 5 分钟窗口一致。
           if stamp>now() or stamp<now()-interval '5 minutes' then continue; end if;
           insert into zxj_private.mail_outbox(user_id,todo_id,kind,occurrence,due_at,state,error)
-          values(s.user_id,t->>'id',ev.kind,occurrence,stamp,
-            case when replace(ev.legacy,'T',' ')=occurrence then 'accepted' else 'pending' end,
-            case when replace(ev.legacy,'T',' ')=occurrence then '沿用旧版发送标记，旧版无法验证实际送达' else null end)
+          values(s.user_id,t->>'id',ev.kind,v_occurrence,stamp,
+            case when replace(ev.legacy,'T',' ')=v_occurrence then 'accepted' else 'pending' end,
+            case when replace(ev.legacy,'T',' ')=v_occurrence then '沿用旧版发送标记，旧版无法验证实际送达' else null end)
           on conflict(user_id,todo_id,kind,occurrence) do update
             set state='pending',retry_at=now(),error=null,updated_at=now()
             where zxj_private.mail_outbox.state='cancelled';
@@ -95,8 +95,8 @@ begin
         where user_id=q.user_id and todo_id=q.todo_id and kind=q.kind and occurrence=q.occurrence;continue;
       end if;
       select value into t from jsonb_array_elements(cfg->'todos') where value->>'id'=q.todo_id;
-      occurrence:=case when q.kind='reminder' then replace(t->>'reminder','T',' ') else (t->>'date')||' '||coalesce(nullif(t->>'time',''),'09:00') end;
-      if t is null or coalesce(t->>'done','false')<>'false' or t->>'priority' is distinct from 'high' or occurrence is distinct from q.occurrence then
+      v_occurrence:=case when q.kind='reminder' then replace(t->>'reminder','T',' ') else (t->>'date')||' '||coalesce(nullif(t->>'time',''),'09:00') end;
+      if t is null or coalesce(t->>'done','false')<>'false' or t->>'priority' is distinct from 'high' or v_occurrence is distinct from q.occurrence then
         update zxj_private.mail_outbox set state='cancelled',error='事项已完成、删除或改期',updated_at=now()
         where user_id=q.user_id and todo_id=q.todo_id and kind=q.kind and occurrence=q.occurrence;continue;
       end if;
