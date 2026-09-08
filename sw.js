@@ -3,6 +3,14 @@ self.addEventListener('install',()=>self.skipWaiting());
 self.addEventListener('activate',event=>event.waitUntil(self.clients.claim()));
 self.addEventListener('push',event=>{
   let message={};try{message=event.data?.json()||{};}catch{}
+  if(message.todoId){
+    event.waitUntil(self.registration.showNotification('知行记 · 事项提醒',{
+      body:String(message.title||'事项已到提醒时间'),
+      tag:'zxj-'+String(message.eventKey||message.id),
+      icon:new URL('icon-192.png',self.registration.scope).href,
+      data:{todoId:message.todoId}
+    }));return;
+  }
   event.waitUntil(self.registration.showNotification('知行记 · 后台提醒测试',{
     body:'如果你在关闭应用或锁屏后看到了这条通知，后台推送链路已打通。',
     tag:'zxj-pilot-'+String(message.id||'test'),icon:new URL('icon-192.png',self.registration.scope).href,

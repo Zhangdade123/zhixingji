@@ -834,6 +834,41 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 <div class="toast-root" id="toastRoot"></div>
 
 <script>
+function backgroundPushKey(){const c=loadCloud();return 'zxj-background-enabled:'+cloudBase(c)+':'+(c.session?.uid||'local')+':'+c.device;}
+function backgroundPushEnabled(){return !!loadCloud().session&&safeGet(backgroundPushKey())==='true';}
+async function reminderPushAPI(action,extra={}){
+  const c=loadCloud();if(!c.session)throw Error('请先登录知行记账号');
+  if(!await ensureToken())throw Error('请重新登录');
+  const current=loadCloud();if(current.session?.uid!==c.session.uid)throw Error('账号已切换');
+  const r=await fetch(cloudBase(current)+'/functions/v1/zxj-push-reminders',{method:'POST',headers:cloudHeaders(current),body:JSON.stringify({action,deviceId:current.device,...extra}),signal:AbortSignal.timeout(20000)});
+  const data=await r.json().catch(()=>({error:'后台推送服务尚未部署'}));
+  if(!r.ok)throw Error(data.error||'后台推送未就绪');
+  if(loadCloud().session?.uid!==current.session.uid)throw Error('账号已切换');return data;
+}
+function openBackgroundReminders(){
+  $('#modalMask').innerHTML=`<div class="modal"><div class="modal-head"><h3>后台事项提醒</h3><button data-act="close-modal">关闭</button></div><div class="modal-body"><p>开启后，已同步事项到点会发送到此设备，关闭网页后也可接收。每台需要提醒的设备分别开启。</p><p>iPhone：先用 Safari 添加到主屏幕，再从桌面图标进入并授权通知。请保持联网；系统勿扰、休眠和推送服务可能影响横幅与到达时间。</p><p>之后开启的新设备不会补发旧事项。延后 10 分钟只作用于当前网页设备。</p><button class="btn btn-primary" id="background-enable">开启此设备后台提醒</button> <button class="btn" id="background-disable">关闭此设备后台提醒</button> <button class="btn" id="background-status">检查推送状态</button><p id="background-result" role="status"></p></div></div>`;
+  $('#modalMask').classList.add('show');
+  const output=message=>{const el=$('#background-result');if(el)el.textContent=message;};
+  $('#background-enable').onclick=async()=>{
+    const btn=$('#background-enable');btn.disabled=true;
+    try{
+      if(!window.PushManager||!window.Notification)throw Error('此环境不支持后台推送；iPhone 请从主屏幕图标进入');
+      if(await Notification.requestPermission()!=='granted')throw Error('尚未允许系统通知');
+      const config=await reminderPushAPI('config');const reg=await prepareNotificationWorker();if(!reg)throw Error('通知服务未就绪');
+      const raw=config.publicKey.replace(/-/g,'+').replace(/_/g,'/');
+      const key=Uint8Array.from(atob(raw+'='.repeat((4-raw.length%4)%4)),x=>x.charCodeAt(0));
+      let sub=await reg.pushManager.getSubscription();
+      if(sub&&String(new Uint8Array(sub.options.applicationServerKey||[]))!==String(key)){await sub.unsubscribe();sub=null;}
+      if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
+      await reminderPushAPI('subscribe',{subscription:sub.toJSON()});
+      localStorage.setItem(backgroundPushKey(),'true');
+      output('此设备订阅已保存。请新建未来 3 分钟的事项并确认云同步成功，再关闭应用验证实际横幅。');
+    }catch(e){output('未开启：'+e.message);}finally{btn.disabled=false;}
+  };
+  $('#background-disable').onclick=async()=>{try{await reminderPushAPI('unsubscribe');localStorage.removeItem(backgroundPushKey());output('已关闭此账号在此设备的后台事项提醒');}catch(e){output(e.message);}};
+  $('#background-status').onclick=async()=>{try{const x=await reminderPushAPI('status');localStorage.setItem(backgroundPushKey(),String(x.enabled));output('此设备订阅：'+(x.enabled?'已开启':'未开启')+'；最近推送：'+(x.job?x.job.state+' '+(x.job.error||''):'暂无记录'));}catch(e){output(e.message);}};
+}
+
 const FIXED_CLOUD_URL='https://xpspmpgicjdtmmclzbuo.supabase.co';
 const FIXED_CLOUD_KEY='sb_publishable_s2T0ztl8_RDdI0lXUn70tw_JFuUej_Z';
 let tokenRefreshJob=null;
@@ -2110,7 +2145,7 @@ function renderMe(){
         <div data-act="open-cloud">${row('cloud','账号与同步',cloudDesc,chev)}</div>
       </div>
       <div class="me-group">
-        <div class="mg-title">数据与计划</div><div data-act="push-pilot">${row('bell','iPhone 后台提醒实验','添加到主屏幕，预约关闭应用后的通知测试',chev)}</div><div data-act="attachment-panel">${row('cloud','附件跨设备同步','查看上传状态、重试和首次启用说明',chev)}</div><div data-act="weekly-review">${row('cal','每周回顾与下周安排','完成、延期与新增笔记；勾选生成下周待办',chev)}</div>
+        <div class="mg-title">数据与计划</div><div data-act="background-reminders">${row('bell','后台事项提醒','每台设备分别开启，关闭网页后接收通知',chev)}</div><div data-act="push-pilot">${row('bell','iPhone 后台提醒实验','添加到主屏幕，预约关闭应用后的通知测试',chev)}</div><div data-act="attachment-panel">${row('cloud','附件跨设备同步','查看上传状态、重试和首次启用说明',chev)}</div><div data-act="weekly-review">${row('cal','每周回顾与下周安排','完成、延期与新增笔记；勾选生成下周待办',chev)}</div>
         <div data-act="cloud-recovery">${row('db','导出切换前快照','最近一次选择云端前，在此设备保存的内容',chev)}</div><div data-act="export" data-kind="backup">${row('db','数据备份','导出正文与本机附件，不包含 API Key',chev)}</div>
         <div data-act="import-backup">${row('db','恢复备份','先预览，再恢复；自动保留当前数据快照',chev)}</div>
         <div data-act="export" data-kind="md">${row('download','导出笔记为 Markdown','全部笔记合并为 .md 文件',chev)}</div>
@@ -2451,6 +2486,7 @@ document.addEventListener('click',e=>{
     case 'attachment-panel': attachmentPanel();break;
     case 'weekly-review': openWeekly();break;
     case 'push-pilot': openPushPilot();break;
+    case 'background-reminders': openBackgroundReminders();break;
     case 'cloud-recovery': exportCloudRecovery();break;
     case 'note-del-file': {flushEditor();const n=noteById(ui.editingNote);n.attachments=n.attachments.filter(a=>(a.id||a.name)!==d.file);persist();renderNotes();break;}
     case 'resolve-cloud': resolveCloudConflict(d.choice);break;
@@ -2935,7 +2971,20 @@ function catRename(id,val){
    ============================================================ */
 // Separate rows keep delivery receipts out of whole-document sync conflicts.
 let reminderCloudError='';
+let reminderOnlineSince=Date.now(),reminderOnlineScope='',reminderLastTick=Date.now();
+function noticeReceiptChannel(){return 'notice-device:'+loadCloud().device;}
+function reminderOnlineWindow(now=Date.now()){
+  const scope=ledgerKey();
+  if(reminderOnlineScope&&reminderOnlineScope!==scope||now-reminderLastTick>120000||navigator.onLine===false)reminderOnlineSince=now;
+  reminderOnlineScope=scope;reminderLastTick=now;
+}
+window.addEventListener('online',()=>{reminderOnlineSince=Date.now();});
+function eligibleOnlineReminder(event,entry,now=Date.now()){
+  const due=entry?.snoozeUntil||event.ts;
+  return navigator.onLine!==false&&due>=reminderOnlineSince&&due<=now&&now-due<=120000;
+}
 async function claimReminderEvent(event, channel='notice', retryOwned=false){
+  if(channel==='notice')channel=noticeReceiptChannel();
   let c=loadCloud();
   if(!c.enabled&&!c.session)return true;
   if(!c.enabled||!c.session||!c.bound||c.status==='conflict')throw Error('请先完成云同步，再检查跨设备提醒');
@@ -2961,14 +3010,14 @@ async function claimReminderEvent(event, channel='notice', retryOwned=false){
     return (await claimed.json()).length===1&&cloudSessionMatches(c,epoch);
   }
   // Email attempts are never repeated on an uncertain network outcome.
-  return (channel==='notice'||retryOwned)&&row.data.owner===owner;
+  return (channel.startsWith('notice-device:')||retryOwned)&&row.data.owner===owner;
 }
 async function shareReminderSnooze(entry){
   const c=loadCloud();if(!c.enabled&&!c.session)return;
   const epoch=cloudEpoch;
   if(!await ensureToken()||!cloudSessionMatches(c,epoch))throw Error('请登录后再延后提醒');
   const current=loadCloud();
-  const url=cloudBase(current)+'/rest/v1/zxj_sync?id=eq.'+encodeURIComponent('receipt:notice:'+entry.key)+'&user_id=eq.'+encodeURIComponent(current.session.uid);
+  const url=cloudBase(current)+'/rest/v1/zxj_sync?id=eq.'+encodeURIComponent('receipt:'+noticeReceiptChannel()+':'+entry.key)+'&user_id=eq.'+encodeURIComponent(current.session.uid);
   const r=await cloudFetch(url,{method:'PATCH',headers:{...cloudHeaders(current),Prefer:'return=representation'},body:JSON.stringify({data:{owner:current.device,snoozeUntil:Date.now()+600000},rev:Date.now()})});
   if(!(await r.json()).length||!cloudSessionMatches(current,epoch))throw Error('延后状态未同步，请重试');
 }
@@ -3001,6 +3050,7 @@ async function requestSystemPermission(){
 }
 function askNotifyPermission(cb){requestSystemPermission().then(cb);}
 async function fireSystemNote(t,kind,entry,channel='auto'){
+  if(t.id!=='test'&&typeof backgroundPushEnabled==='function'&&backgroundPushEnabled()&&!entry?.snoozeUntil){if(entry){entry.system='managed';entry.channel='backend';}return true;}
   if(!DB.settings.systemNotify||!('Notification'in window)||Notification.permission!=='granted')return false;
   const title=kind==='due'?'知行记 · 截止提醒':'知行记 · 事项提醒';
   const tag='zxj-'+(entry?.key||t.id),options={body:t.title,tag,requireInteraction:true,silent:false,data:{todoId:t.id==='test'?null:t.id}};
@@ -3035,12 +3085,14 @@ async function checkReminders(){
   refreshDay();lastReminderCheck=Date.now();loadReminderLedger();
   if(storageBlocked||!(DB.settings.notify||DB.settings.systemNotify))return;
   const scope=ledgerScope;
-  const now=Date.now(),valid=new Set();
+  const now=Date.now(),valid=new Set();reminderOnlineWindow(now);
   for(const t of DB.todos){for(const event of currentReminderEvents(t)){
     valid.add(event.key);if(event.ts>now)continue;
     let entry=reminderLedger[event.key];
     if(!entry)entry=reminderLedger[event.key]={...event,ack:false,system:'pending',attempts:0};
-    // Claim even acknowledged local entries to migrate old device receipts.
+    entry.cloudAllowed=false;
+    if(!eligibleOnlineReminder(event,entry,now))continue;
+    // Each online device receives the event, while later sessions skip it.
     // A hidden page without system notifications must not consume a reminder.
     if(!entry.ack&&document.hidden&&!(DB.settings.systemNotify&&window.Notification?.permission==='granted'))continue;
     entry.cloudAllowed=false;
@@ -3048,7 +3100,7 @@ async function checkReminders(){
     catch(e){reminderCloudError=e.message;continue;}
     if(scope!==ledgerKey())return;
     if(!entry.cloudAllowed||entry.ack||entry.snoozeUntil>now)continue;
-    if(entry.system!=='created'&&(!entry.retryAt||entry.retryAt<=now))await fireSystemNote(t,event.kind,entry);
+    if(!['created','managed'].includes(entry.system)&&(!entry.retryAt||entry.retryAt<=now))await fireSystemNote(t,event.kind,entry);
     if(scope!==ledgerKey())return;
   }}
   for(const key of Object.keys(reminderLedger)){const entry=reminderLedger[key];if(!valid.has(key)||(entry.ack&&entry.ts<now-90*86400000))delete reminderLedger[key];}
@@ -3057,7 +3109,7 @@ async function checkReminders(){
 }
 function showNextReminder(){
   if(remindShowing||!DB.settings.notify||document.visibilityState==='hidden')return;
-  const entry=Object.values(reminderLedger).find(e=>e.cloudAllowed===true&&!e.ack&&!(e.snoozeUntil>Date.now())&&byId(e.id)&&!byId(e.id).done);
+  const entry=Object.values(reminderLedger).find(e=>e.cloudAllowed===true&&eligibleOnlineReminder(e,e)&&!e.ack&&!(e.snoozeUntil>Date.now())&&byId(e.id)&&!byId(e.id).done);
   if(!entry)return;
   const t=byId(entry.id);activeReminderKey=entry.key;remindShowing=true;
   const rest=Object.values(reminderLedger).filter(e=>!e.ack).length-1;
@@ -3444,7 +3496,7 @@ $('#m-new-note').addEventListener('click',createNote);
 const startupParams=new URLSearchParams(location.hash.split('?')[1]||'');
 const linkedTodo=startupParams.get('todo');
 const installedApp=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
-if(installedApp&&location.hash==='#/me'){
+if(location.hash==='#/me'){
   const preferred=['home','todos','notes','calendar'].includes(DB.settings.defaultPage)?DB.settings.defaultPage:'home';
   history.replaceState(null,'',location.pathname+location.search+'#/'+preferred);
 }

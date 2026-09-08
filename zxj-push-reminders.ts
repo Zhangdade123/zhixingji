@@ -1,0 +1,71 @@
+// Supabase Edge Function name: zxj-push-reminders
+// Disable gateway "Verify JWT"; user requests are authenticated below with getUser.
+import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
+import webpush from 'npm:web-push@3.6.7';
+const db=createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,{auth:{persistSession:false,autoRefreshToken:false}});
+const cors={'Access-Control-Allow-Origin':'https://zhangdade123.github.io','Access-Control-Allow-Headers':'authorization,apikey,content-type','Access-Control-Allow-Methods':'POST,OPTIONS'};
+function reply(data:unknown,status=200){return new Response(JSON.stringify(data),{status,headers:{...cors,'Content-Type':'application/json'}});}
+function validSubscription(s:any){
+  if(!s||typeof s.endpoint!=='string'||s.endpoint.length>4096)throw Error('订阅格式错误');
+  const u=new URL(s.endpoint),h=u.hostname;
+  const allowed=h==='web.push.apple.com'||h.endsWith('.push.apple.com')||h==='fcm.googleapis.com'||h==='updates.push.services.mozilla.com'||h.endsWith('.notify.windows.com');
+  if(u.protocol!=='https:'||u.port||u.username||u.password||!allowed)throw Error('不支持的推送服务地址');
+  if(!/^[a-zA-Z0-9_-]{87}$/.test(s.keys?.p256dh||'')||!/^[a-zA-Z0-9_-]{22}$/.test(s.keys?.auth||''))throw Error('订阅密钥格式错误');
+  return {endpoint:s.endpoint,keys:{p256dh:s.keys.p256dh,auth:s.keys.auth}};
+}
+async function config(){const {data,error}=await db.from('zxj_push_reminders_config').select('*').eq('id',true).single();if(error||!data)throw Error('请先执行 push-reminders.sql');return data;}
+async function vapid(){let c=await config();if(!c.vapid){const keys=webpush.generateVAPIDKeys();const {error}=await db.from('zxj_push_reminders_config').update({vapid:keys}).eq('id',true).is('vapid',null);if(error)throw Error('保存推送密钥失败');c=await config();}return c.vapid;}
+Deno.serve(async(req)=>{
+  if(req.method==='OPTIONS')return new Response(null,{headers:cors});
+  if(req.method!=='POST')return reply({error:'Method not allowed'},405);
+  try{
+    const text=await req.text();if(text.length>12000)return reply({error:'请求过大'},413);const body=JSON.parse(text);
+    if(body.action==='dispatch'){
+      const c=await config();if(req.headers.get('x-zxj-worker')!==c.worker_secret)return reply({error:'Unauthorized'},401);
+      const keys=await vapid();const {data:jobs,error}=await db.rpc('zxj_push_reminders_claim');if(error)throw Error('领取测试任务失败');
+      for(const job of jobs||[]){let state='accepted',message='';try{
+        if(job.todo_id){
+          const {data:sub,error:subError}=await db.from('zxj_push_reminders_subscriptions').select('subscription').eq('user_id',job.user_id).eq('device_id',job.device_id).maybeSingle();
+          const {data:row,error:rowError}=await db.from('zxj_sync').select('data').eq('user_id',job.user_id).eq('id','main').single();
+          if(subError||rowError)throw Error('重新检查事项失败');
+          const task=row?.data?.todos?.find((t:any)=>t.id===job.todo_id);
+          const keys=task?[task.id+'|reminder|'+task.reminder,task.id+'|due|'+task.date+' '+(task.time||'09:00')]:[];
+          if(!sub||!task||task.done||!keys.includes(job.event_key)||Date.now()-Date.parse(job.due_at)>120000){
+            await db.from('zxj_push_reminders_jobs').update({state:'failed',error:'已取消、改期或超过发送窗口'}).eq('id',job.id);continue;
+          }
+          job.subscription=sub.subscription;job.title=task.title;
+        }
+        const sub=validSubscription(job.subscription);
+        await webpush.sendNotification(sub,JSON.stringify({id:job.id,todoId:job.todo_id,title:job.title,eventKey:job.event_key}),{TTL:60,urgency:'high',timeout:8000,vapidDetails:{subject:'https://zhangdade123.github.io/zhixingji/',publicKey:keys.publicKey,privateKey:keys.privateKey}});
+      }catch(e){state=e.statusCode?'failed':'unknown';message=e.statusCode?'推送服务返回 HTTP '+e.statusCode:'网络响应不确定，请检查手机后再测试';}
+        const {error:updateError}=await db.from('zxj_push_reminders_jobs').update({state,error:message}).eq('id',job.id).eq('state','sending');if(updateError)throw Error('记录发送结果失败');
+      }
+      return reply({processed:jobs?.length||0});
+    }
+    const jwt=req.headers.get('Authorization')?.replace(/^Bearer\s+/i,'');if(!jwt)return reply({error:'请先登录'},401);
+    const {data:auth,error:authError}=await db.auth.getUser(jwt);if(authError||!auth.user)return reply({error:'登录无效，请重新登录'},401);const userId=auth.user.id;
+    if(body.action==='config')return reply({publicKey:(await vapid()).publicKey});
+    if(['subscribe','unsubscribe'].includes(body.action)){
+      if(typeof body.deviceId!=='string'||!/^[a-zA-Z0-9_-]{1,100}$/.test(body.deviceId))return reply({error:'设备标识无效'},400);
+      if(body.action==='unsubscribe'){
+        const {error}=await db.from('zxj_push_reminders_subscriptions').delete().eq('user_id',userId).eq('device_id',body.deviceId);
+        if(error)throw Error('关闭失败');return reply({enabled:false});
+      }
+      const subscription=validSubscription(body.subscription);
+      const {error}=await db.from('zxj_push_reminders_subscriptions').upsert({user_id:userId,device_id:body.deviceId,subscription,enabled_at:new Date().toISOString()});
+      if(error)throw Error('保存订阅失败，请检查 SQL 部署');return reply({enabled:true});
+    }
+    if(body.action==='status'){
+      const {data,error}=await db.from('zxj_push_reminders_jobs').select('id,state,error,due_at').eq('user_id',userId).eq('device_id',body.deviceId).order('created_at',{ascending:false}).limit(1);
+      const {data:sub,error:subError}=await db.from('zxj_push_reminders_subscriptions').select('device_id').eq('user_id',userId).eq('device_id',body.deviceId).maybeSingle();
+      if(error||subError)throw Error('读取推送记录失败');return reply({job:data?.[0]||null,enabled:!!sub});
+    }
+    if(body.action==='schedule'){
+      const subscription=validSubscription(body.subscription);
+      const {data:recent,error:readError}=await db.from('zxj_push_reminders_jobs').select('id').eq('user_id',userId).gte('created_at',new Date(Date.now()-60000).toISOString()).limit(1);if(readError)throw Error('请先部署测试 SQL');if(recent?.length)return reply({error:'请间隔一分钟再测试'},429);
+      const {data,error}=await db.from('zxj_push_reminders_jobs').insert({user_id:userId,subscription}).select('id,due_at').single();if(error)return reply({error:error.code==='23505'?'已有测试等待发送，请稍后查看结果':'预约失败，请检查 SQL 部署'},409);return reply(data);
+    }
+    return reply({error:'不支持的操作'},400);
+  }catch(e){return reply({error:e.message||'推送实验服务异常'},500);}
+});
+
