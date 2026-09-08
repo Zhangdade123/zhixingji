@@ -1,0 +1,48 @@
+name: Publish Zhixingji
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: zhixingji-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Prepare static site
+        shell: bash
+        run: |
+          mkdir _site
+          find . -maxdepth 1 -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' -o -name '*.png' -o -name '*.webmanifest' -o -name '*.sql' -o -name '*.md' -o -name '*.ts' \) -exec cp '{}' _site/ \;
+          test -s _site/index.html
+          test -s _site/sw.js
+          test -s _site/manifest.webmanifest
+      - name: Upload site
+        id: upload
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - name: Deploy uploaded artifact
+        id: deploy
+        uses: actions/github-script@v7
+        env:
+          PAGES_ARTIFACT_ID: ${{ steps.upload.outputs.artifact_id }}
+        with:
+          script: |
+            const deploy = require('./.github/scripts/deploy-pages.cjs');
+            await deploy({github, context, core});
