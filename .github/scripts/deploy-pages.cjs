@@ -15,11 +15,11 @@ module.exports = async function deploy({github, context, core, sleep = ms => new
       ...repo, deployment_id: deployment.id
     });
     core.info(`Pages deployment status: ${data.status}`);
-    if (data.status === 'built') {
+    if (data.status === 'succeed') {
       core.setOutput('page_url', deployment.page_url || 'https://zhangdade123.github.io/zhixingji/');
       return;
     }
-    if (['errored','failed','deployment_failed','deployment_cancelled','cancelled'].includes(data.status)) {
+    if (['errored','failed','deployment_failed','deployment_cancelled','deployment_perms_error','deployment_content_failed','deployment_lost','cancelled'].includes(data.status)) {
       throw Error(`Pages deployment failed: ${data.status}`);
     }
     await sleep(10000);
