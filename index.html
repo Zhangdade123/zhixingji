@@ -1071,15 +1071,16 @@ function chooseBackup(){const input=document.createElement('input');input.type='
 };input.click();}
 async function restoreBackup(){
   if(!importPreview)return;const btn=$('#confirm-restore');if(btn)btn.disabled=true;
-  try{flushEditor();const preview=importPreview;
+  try{flushEditor();const preview=importPreview,c=loadCloud(),epoch=cloudEpoch;
+    if(!cloudReady||cloudPending||navigator.onLine===false)throw Error('请先联网并等待云端记录确认');
     if(storageBlocked)download('知行记-恢复前原始数据.json',bootRaw||'{}','application/json');else{const backup=await makeBackup();download('知行记-恢复前完整备份.json',JSON.stringify(backup),'application/json');}
     const data=migrate(preview.data);const refs=new Set(allAttachments(data).map(a=>a.id).filter(Boolean));
     const remap=new Map();
     for(const [id,url] of Object.entries(preview.files)){if(!refs.has(id)||typeof url!=='string'||!/^data:[^,]*;base64,/.test(url))throw Error('附件数据不合法');const encoded=url.slice(url.indexOf(',')+1);if(encoded.length>30*1048576)throw Error('附件过大');const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));const newId=uid();await blobPut(newId,new Blob([bytes],{type:'application/octet-stream'}));remap.set(id,newId);}
     for(const a of allAttachments(data))if(remap.has(a.id))a.id=remap.get(a.id);
-    const old=DB;disposeEditor();DB=data;DB._rev=Math.max(Date.now(),(old._rev||0)+1);
-    try{localStorage.setItem(STORE,JSON.stringify(DB));}catch(e){DB=old;throw e;}
-    storageBlocked=false;bootRaw=null;clearStorageError();applyDevicePreferences();persist();ui.editingNote=null;importPreview=null;closeModal();rerenderCurrent();toast('备份已恢复');
+    if(!cloudSessionMatches(c,epoch)||cloudPending)throw Error('账号或数据已变化，请重新导入');
+    cancelCloudEditor();DB=data;DB._rev=cloudAccepted.rev;
+    applyDevicePreferences();if(!persist())throw Error('备份尚未保存到云端');ui.editingNote=null;importPreview=null;closeModal();rerenderCurrent();toast('备份正在保存到云端');
   }catch(e){toast('恢复失败：'+e.message);if(btn)btn.disabled=false;}
 }
 function saveDevicePreferences(){try{localStorage.setItem('zhixingji-device-prefs',JSON.stringify({notify:!!DB.settings.notify,systemNotify:!!DB.settings.systemNotify}));}catch(e){showStorageError(e.message);}}
