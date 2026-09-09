@@ -8,7 +8,7 @@ async function ensureToken(){
 }
 function syncErrorMessage(e){
   if(e.name==='AbortError'||e.name==='TimeoutError')return '连接超时，请保持页面打开并重试';
-  if(/load failed|failed to fetch|network|fetch failed/i.test(e.message||''))return navigator.onLine===false?'当前离线，本机内容已保留，联网后重试':'网络请求未完成，请检查手机网络或切换 Wi-Fi/蜂窝网络后重试';
+  if(/load failed|failed to fetch|network|fetch failed/i.test(e.message||''))return navigator.onLine===false?'当前离线，仅可查看缓存，请联网后重新读取云端':'网络请求未完成，请检查手机网络或切换 Wi-Fi/蜂窝网络后重试';
   return e.message||'同步未完成';
 }
 async function storeCloudRecovery(){

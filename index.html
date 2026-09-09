@@ -879,7 +879,7 @@ async function ensureToken(){
 }
 function syncErrorMessage(e){
   if(e.name==='AbortError'||e.name==='TimeoutError')return '连接超时，请保持页面打开并重试';
-  if(/load failed|failed to fetch|network|fetch failed/i.test(e.message||''))return navigator.onLine===false?'当前离线，本机内容已保留，联网后重试':'网络请求未完成，请检查手机网络或切换 Wi-Fi/蜂窝网络后重试';
+  if(/load failed|failed to fetch|network|fetch failed/i.test(e.message||''))return navigator.onLine===false?'当前离线，仅可查看缓存，请联网后重新读取云端':'网络请求未完成，请检查手机网络或切换 Wi-Fi/蜂窝网络后重试';
   return e.message||'同步未完成';
 }
 async function storeCloudRecovery(){
@@ -938,7 +938,7 @@ let attachmentScanBusy=false;
 function attachmentStatus(a){const s=attachmentTransfers.get(a.id);return s?.busy?'上传中':s?.error?'仅本机 · 上传失败':a.cloudFile?'已同步':'仅本机';}
 function attachmentLink(a){return a.id?`<button class="btn-text" data-act="download-attachment" data-file="${esc(a.id)}" title="${esc(a.name)}">${esc(a.name)}</button><small data-file-status="${esc(a.id)}">${attachmentStatus(a)}</small><button class="btn-text" data-act="upload-attachment" data-file="${esc(a.id)}">${a.cloudFile?'检查同步':'上传 / 重试'}</button>`:`<span>${esc(a.name)} <small>仅文件名，需重新添加原文件</small></span>`;}
 function refreshAttachmentStatus(){document.querySelectorAll('[data-file-status]').forEach(el=>{const a=allAttachments().find(a=>a.id===el.dataset.fileStatus);if(a){el.textContent=attachmentStatus(a);el.title=attachmentTransfers.get(a.id)?.error||'';}});}
-async function attachmentContext(){const c=loadCloud(),epoch=cloudEpoch;if(storageBlocked||!c.enabled||!c.session||!c.bound||c.lastUid!==c.session.uid||c.status==='conflict')throw Error('请先登录并完成账号数据同步，处理版本冲突');if(!await ensureToken()||!cloudSessionMatches(c,epoch))throw Error('登录已变化，请重试');return {c:loadCloud(),epoch};}
+async function attachmentContext(){if(!cloudReady||cloudPending)throw Error('请等待云端记录确认后重试');const c=loadCloud(),epoch=cloudEpoch;if(storageBlocked||!c.enabled||!c.session||!c.bound||c.lastUid!==c.session.uid||c.status==='conflict')throw Error('请先登录并完成账号数据同步，处理版本冲突');if(!await ensureToken()||!cloudSessionMatches(c,epoch))throw Error('登录已变化，请重试');return {c:loadCloud(),epoch};}
 function storageObjectURL(c,path,download=false){return cloudBase(c)+'/storage/v1/object/'+(download?'authenticated/':'')+'zxj-files/'+path.split('/').map(encodeURIComponent).join('/');}
 async function uploadAttachment(id,manual=true){
   if(attachmentTransfers.get(id)?.busy)return;
@@ -1087,14 +1087,15 @@ function applyDevicePreferences(){let prefs;try{prefs=JSON.parse(safeGet('zhixin
 function businessSnapshot(){const d=JSON.parse(JSON.stringify(DB));delete d.settings.notify;delete d.settings.systemNotify;for(const t of d.todos){for(const k of Object.keys(t))if(/^_(remind|dueNotif|snooze)/.test(k))delete t[k];}return d;}
 function refreshDay(){const next=businessToday();if(next===T)return;const old=T;T=next;if(ui.calSelected===old){ui.calSelected=T;ui.calMonth=T.slice(0,7);}if(!$('#modalMask').classList.contains('show')&&currentRoute()!=='notes')rerenderCurrent();}
 function initReliability(){
+  initCloudAuthority();
   initMailAutomation();initNotificationWorker();
   applyDevicePreferences();if(bootLoadError)showStorageError('读取失败：'+bootLoadError+'。原始数据未被覆盖。');
   else persist(false);
   window.addEventListener('pagehide',flushEditor);
-  window.addEventListener('beforeunload',e=>{flushEditor();if(fileJobs||document.getElementById('storage-warning')){e.preventDefault();e.returnValue='';}});
+  window.addEventListener('beforeunload',e=>{flushEditor();if(cloudPending||fileJobs||document.getElementById('storage-warning')){e.preventDefault();e.returnValue='';}});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){refreshDay();checkReminders();}else flushEditor();});
   window.addEventListener('pageshow',()=>{refreshDay();checkReminders();});
-  window.addEventListener('storage',e=>{if(e.key===STORE&&e.newValue!==JSON.stringify(DB)){showStorageError('另一个窗口修改了数据。请先导出当前草稿，关闭其他编辑窗口并刷新；已暂停自动保存。');storageBlocked=true;}});
+  window.addEventListener('storage',e=>{if(e.key===CLOUD_STORE && cloudScope && cloudScope!==authorityScope(loadCloud()))resetCloudAuthority(true);if(e.key===STORE||e.key===CLOUD_STORE)syncCloud();});
   let previousFocus=null;
   const mask=$('#modalMask');new MutationObserver(()=>{const dialog=mask.querySelector('.modal');if(mask.classList.contains('show')&&dialog){dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');dialog.tabIndex=-1;if(!dialog.contains(document.activeElement)){previousFocus=document.activeElement;(dialog.querySelector('input,button,textarea,select')||dialog).focus();}}else if(previousFocus?.isConnected){previousFocus.focus();previousFocus=null;}}).observe(mask,{childList:true,attributes:true,attributeFilter:['class']});
   document.addEventListener('keydown',e=>{if(e.key!=='Tab')return;const dialog=document.querySelector('#remindLayer.show .remind-card')||document.querySelector('#modalMask.show .modal');if(!dialog)return;const els=[...dialog.querySelectorAll('button:not(:disabled),input:not(:disabled),select,textarea,a[href]')].filter(x=>x.offsetParent);if(!els.length)return;const first=els[0],last=els.at(-1);if(e.shiftKey&&(document.activeElement===first||!dialog.contains(document.activeElement))){e.preventDefault();last.focus();}else if(!e.shiftKey&&(document.activeElement===last||!dialog.contains(document.activeElement))){e.preventDefault();first.focus();}});
@@ -1309,11 +1310,8 @@ DB=load()||migrate(seed());
 let applyingRemote=false;
 function persist(touch=true){
   if(storageBlocked){showStorageError('原始数据无法读取，已阻止覆盖。请导出原始数据并从备份恢复。');return false;}
-  if(touch&&!applyingRemote)DB._rev=Math.max(Date.now(),(DB._rev||0)+1);
-  try{localStorage.setItem(STORE,JSON.stringify(DB));clearStorageError();}
-  catch(e){showStorageError('保存失败：'+e.message+'。当前修改仍在内存，请立即导出备份。');return false;}
-  if(touch&&!applyingRemote){const c=loadCloud();c.dirty=true;saveCloud(c);scheduleCloudPush();}
-  return true;
+  if(touch&&!applyingRemote)return queueCloudMutation();
+  return cacheConfirmedCloud();
 }
 /* 类型目录（笔记与待办共用） */
 const CAT_COLORS=['#3450C5','#2E9E6B','#B07A2C','#7A5BC4','#B5527C','#3E8C99','#C0564A'];
@@ -1776,11 +1774,11 @@ function bindEditor(n){
     if(closed||!dirty)return;
     const current=noteById(n.id);if(current!==n){dirty=false;return;}
     n.title=title.value.trim();n.content=sanitizeHtml(body.innerHTML);n.updatedAt=Date.now();
-    if(persist()){dirty=false;state.textContent='已保存';state.classList.remove('saving');}else state.textContent='保存失败，请导出备份';
+    if(persist()){dirty=false;state.textContent=cloudPending?'正在保存到云端…':'已保存到云端';state.classList.toggle('saving',cloudPending);}else{dirty=false;state.textContent='未保存，请重新读取云端后操作';}
   };
   const autoSave=debounce(doSave,600);
   const onChange=()=>{dirty=true;state.textContent='正在保存…';state.classList.add('saving');autoSave();};
-  editorSession={flush:()=>{autoSave.cancel();doSave();},cancel:()=>{autoSave.cancel();closed=true;}};
+  editorSession={hasDraft:()=>dirty,flush:()=>{autoSave.cancel();doSave();},cancel:()=>{autoSave.cancel();closed=true;}};
   window._flushEditor=()=>editorSession?.flush();
   body.addEventListener('input',onChange);title.addEventListener('input',onChange);
   body.addEventListener('paste',e=>{e.preventDefault();const html=e.clipboardData.getData('text/html');const text=e.clipboardData.getData('text/plain');document.execCommand('insertHTML',false,html?sanitizeHtml(html):esc(text).replace(/\n/g,'<br>'));onChange();});
@@ -2391,6 +2389,7 @@ function closeModal(){const m=$('#modalMask');m.classList.remove('show');m.inner
    十五、Toast / 音效 / 导出
    ============================================================ */
 function toast(msg){
+  if(cloudNotice && /^(已|保存|备份已恢复)/.test(msg))msg=cloudNotice;
   const el=document.createElement('div');el.className='toast';el.textContent=msg;
   $('#toastRoot').appendChild(el);
   setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(()=>el.remove(),320);},2100);
@@ -2682,8 +2681,8 @@ function spawnNextOccurrence(t){
 }
 function toggleTodo(id){
   const t=byId(id);if(!t)return;t.done=!t.done;t.doneAt=t.done?Date.now():null;
-  if(t.done){spawnNextOccurrence(t);ding();toast('已完成'+(t.repeat!=='none'?'，已检查下一次安排':''));}
-  persist();rerenderCurrent();
+  if(t.done)spawnNextOccurrence(t);
+  if(persist()&&t.done){ding();toast('已完成'+(t.repeat!=='none'?'，已检查下一次安排':''));}rerenderCurrent();
 }
 
 function reopenMiniMenu(id){ // 重绘后同步重新展开指定待办的快捷菜单（日期/时间连改时不收起）
@@ -3080,6 +3079,7 @@ function currentReminderEvents(t){
   return events.map(e=>({...e,key:t.id+'|'+e.kind+'|'+e.value,id:t.id}));
 }
 async function checkReminders(){
+  if(!cloudReady||cloudPending)return;
   if(reminderScanBusy)return;reminderScanBusy=true;
   try{
   refreshDay();lastReminderCheck=Date.now();loadReminderLedger();
@@ -3198,6 +3198,7 @@ async function sendMailResult(subject,message){
 }
 async function sendMailX(subject,message){const r=await sendMailResult(subject,message);if(!r.ok){mailLastError=r.error;toast('邮件未确认发送：'+r.error);}return r.ok;}
 async function checkMails(){
+  if(!cloudReady||cloudPending)return;
   if(mailScanBusy||storageBlocked)return;lastMailCheck=Date.now();initMailAutomation();if(mailAutomationReason())return;
   mailScanBusy=true;const scope=mailAutoScope();
   const run=async()=>{
@@ -3291,7 +3292,7 @@ async function refreshCloudToken(){
   }catch(e){return false;}
 }
 function sbSignOut(){
-  cloudEpoch++;
+  resetCloudAuthority(true);
   const c=loadCloud();
   if(c.session&&c.session.access_token){fetch(cloudBase(c)+'/auth/v1/logout',{method:'POST',headers:{'apikey':c.key,'Authorization':'Bearer '+c.session.access_token}}).catch(()=>{});}
   c.session=null;c.enabled=false;c.bound=false;c.status='off';saveCloud(c);
@@ -3304,110 +3305,132 @@ function scheduleCloudPush(){
 }
 function setCloudStatus(s){const c=loadCloud();c.status=s;saveCloud(c);const el=$('#cloud-state');if(el)el.textContent=cloudStateText(s);}
 function cloudStateText(s){return ({conflict:'存在版本冲突，请处理',idle:'已配置，待同步',pushing:'正在上传…',pulling:'正在同步…',ok:'已同步',error:'同步失败',off:'未启用'})[s]||s;}
+// Cloud is authoritative. Pending edits exist in memory only, never in the reload cache.
+let cloudReady=false,cloudAccepted=null,cloudPending=false,cloudGeneration=0,cloudScope='',cloudNotice='';
+let cloudFallback=JSON.parse(JSON.stringify(DB));
+const cloudClone=x=>JSON.parse(JSON.stringify(x));
+function authorityScope(c){return c.enabled&&c.session?.uid?cloudBase(c)+'|'+c.session.uid:'';}
+function cloudDataKey(data){const d=cloudClone(data);delete d._rev;return JSON.stringify(d);}
+function authorityMessage(msg){
+  cloudNotice=msg;
+  let el=document.getElementById('cloud-authority-state');
+  if(!el){el=document.createElement('div');el.id='cloud-authority-state';el.setAttribute('role','status');el.style.cssText='position:fixed;bottom:82px;left:50%;transform:translateX(-50%);z-index:9999;max-width:90vw;padding:9px 14px;background:#28386c;color:white;border-radius:10px;font-size:13px;pointer-events:none';document.body.appendChild(el);}
+  el.textContent=msg;el.hidden=!msg;
+}
+function cacheConfirmedCloud(){
+  // Cache confirmed data, including device preferences; never persist an optimistic DB.
+  if(!cloudAccepted)return true;
+  const data=cloudClone(cloudAccepted.data);
+  data.settings.notify=DB.settings.notify;data.settings.systemNotify=DB.settings.systemNotify;
+  try{localStorage.setItem(STORE,JSON.stringify(data));clearStorageError();return true;}
+  catch(e){showStorageError('云端记录已保留，但此设备缓存失败：'+e.message);return false;}
+}
+function cancelCloudEditor(){if(editorSession){editorSession.cancel();editorSession=null;}window._flushEditor=null;}
+function resetCloudAuthority(clear=false){
+  cloudEpoch++;cloudReady=false;cloudPending=false;cloudAccepted=null;cloudScope='';cloudConflict=null;
+  cancelCloudEditor();
+  if(clear){DB=migrate({});applyDevicePreferences();cloudFallback=cloudClone(DB);ui.editingNote=null;try{localStorage.removeItem(STORE);}catch{};queueMicrotask(rerenderCurrent);}
+}
+function initCloudAuthority(){
+  authorityMessage(loadCloud().session?'正在读取最新云端记录，暂不可修改':'请登录后修改记录；当前仅可查看缓存');
+  window.addEventListener('offline',()=>authorityMessage('当前离线，仅可查看缓存；修改不会补写云端'));
+}
 async function cloudFetch(url,options={}){
   const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),25000);
   try{const r=await fetch(url,{...options,signal:ctrl.signal});if(!r.ok)throw Error(r.status===401?'登录凭据已失效，请重新登录':r.status===403?'云端权限不足，请检查账号与数据库授权':'云端返回 HTTP '+r.status);return r;}
   catch(e){throw Error(syncErrorMessage(e));}finally{clearTimeout(timer);}
 }
 function cloudTableURL(c){return cloudBase(c)+'/rest/v1/zxj_sync?id=eq.main&user_id=eq.'+encodeURIComponent(c.session.uid);}
-function cloudSessionMatches(c,epoch){const latest=loadCloud();return cloudEpoch===epoch&&latest.enabled&&latest.session?.uid===c.session?.uid&&cloudBase(latest)===cloudBase(c);}
-function localDirty(c){return !!c.dirty||(DB._rev||0)>(c.remoteRev||0);}
-function cloudEditing(){return !!(editorSession&&document.querySelector('#saveState.saving'))||$('#modalMask').classList.contains('show')||fileJobs>0;}
+function cloudSessionMatches(c,epoch){return cloudEpoch===epoch&&authorityScope(loadCloud())===authorityScope(c)&&!!authorityScope(c);}
+function localDirty(){return cloudPending;}
+function cloudEditing(){return !!editorSession||$('#modalMask').classList.contains('show')||fileJobs>0;}
 async function fetchCloudRow(c){const r=await cloudFetch(cloudTableURL(c)+'&select=data,rev,device',{headers:cloudHeaders(c)});const rows=await r.json();if(!Array.isArray(rows))throw Error('云端响应格式错误');return rows[0]||null;}
 function applyCloudRow(remote,c){
-  if(storageBlocked)throw Error('本地数据待恢复，已暂停同步');
-  const old=DB;const candidate=JSON.parse(JSON.stringify(remote.data));if(candidate.settings?.ai)delete candidate.settings.ai.key;
+  const candidate=cloudClone(remote.data);if(candidate.settings?.ai)delete candidate.settings.ai.key;
   const next=migrate(candidate);next._rev=Number(remote.rev)||0;
-  disposeEditor();applyingRemote=true;
-  try{DB=next;applyDevicePreferences();if(!persist(false)){DB=old;throw Error('云数据无法保存到本机');}}
+  cancelCloudEditor();applyingRemote=true;
+  try{DB=next;applyDevicePreferences();cloudAccepted={data:businessSnapshot(),rev:next._rev};cloudFallback=cloudClone(DB);cloudScope=authorityScope(c);cloudReady=true;cloudPending=false;cacheConfirmedCloud();}
   finally{applyingRemote=false;}
-  ui.editingNote=null;const latest=loadCloud();latest.remoteRev=next._rev;latest.bound=true;latest.dirty=false;latest.lastUid=c.session.uid;latest.lastPullAt=Date.now();latest.status='ok';saveCloud(latest);rerenderCurrent();
+  ui.editingNote=null;cloudConflict=null;
+  const latest=loadCloud();latest.remoteRev=next._rev;latest.bound=true;latest.dirty=false;latest.lastUid=c.session.uid;latest.lastPullAt=Date.now();latest.status='ok';saveCloud(latest);
+  authorityMessage('');rerenderCurrent();
 }
-function showCloudConflict(remote,c,force=false){
-  cloudConflict={remote,uid:c.session.uid,epoch:cloudEpoch};setCloudStatus('conflict');
-  if(!force&&($('#modalMask').classList.contains('show')||currentRoute()==='notes'))return;
-  $('#modalMask').innerHTML=`<div class="modal" role="dialog" aria-modal="true" tabindex="-1"><div class="modal-head"><h3>发现不同的数据版本</h3></div><div class="modal-body"><p>本机和云端都可能有修改，自动同步已暂停。可以先保存本机快照，再选择保留哪个版本。</p><p>本机：${DB.todos.length} 条待办、${DB.notes.length} 条笔记。云端：${remote.data?.todos?.length||0} 条待办、${remote.data?.notes?.length||0} 条笔记。</p><label style="display:flex;gap:10px;align-items:center"><input type="checkbox" id="cloud-keep-backup" checked> 先备份本机内容（仅保存于此设备）</label><p style="margin-top:12px">取消勾选后采用云端，将覆盖未同步的本机修改，不生成本次恢复快照。</p></div><div class="modal-foot"><button class="btn" data-act="close-modal">稍后处理</button><button class="btn" data-act="resolve-cloud" data-choice="remote">采用云端版本</button><button class="btn btn-primary" data-act="resolve-cloud" data-choice="local">保留本机版本</button></div></div>`;$('#modalMask').classList.add('show');
+function retainUnsentDraft(){
+  // Recovery is manual export only, never a source for automatic cloud writes.
+  const data=businessSnapshot();blobPut('cloud-recovery',new Blob([JSON.stringify(data)],{type:'application/json'})).catch(()=>{});
+}
+function rejectCloudMutation(message,remote=null,c=loadCloud()){
+  retainUnsentDraft();cloudPending=false;cancelCloudEditor();
+  if(remote){closeModal();applyCloudRow(remote,c);}
+  else{DB=migrate(cloudClone(cloudAccepted?.data||cloudFallback));applyDevicePreferences();ui.editingNote=null;queueMicrotask(()=>{closeModal();rerenderCurrent();});}
+  authorityMessage(message);
+}
+function queueCloudMutation(){
+  const c=loadCloud();
+  if(!cloudReady||cloudScope!==authorityScope(c)||navigator.onLine===false){
+    rejectCloudMutation(navigator.onLine===false?'未保存：当前离线，请联网后重新操作':'未保存：请先登录并读取最新云端记录');return false;
+  }
+  if(cloudDataKey(businessSnapshot())===cloudDataKey(cloudAccepted.data)&&!cloudPending)return true;
+  cloudPending=true;cloudGeneration++;authorityMessage('正在保存到云端，请勿关闭页面…');setCloudStatus('pushing');
+  queueMicrotask(syncCloud);return true;
 }
 async function writeCloud(c,expected,epoch){
-  if(storageBlocked||!cloudSessionMatches(c,epoch))return;
-  const originalRev=DB._rev||0,nextRev=Math.max(Date.now(),originalRev,(expected||0)+1);
-  const data=businessSnapshot();data._rev=nextRev;
-  const payload={id:'main',user_id:c.session.uid,data,rev:nextRev,device:c.device,updated_at:new Date().toISOString()};
+  const generation=cloudGeneration,data=businessSnapshot(),nextRev=Math.max(Date.now(),(expected||0)+1);data._rev=nextRev;
   const headers={...cloudHeaders(c),Prefer:expected===null?'resolution=ignore-duplicates,return=representation':'return=representation'};
   const url=expected===null?cloudBase(c)+'/rest/v1/zxj_sync':cloudTableURL(c)+'&rev=eq.'+expected;
-  const response=await cloudFetch(url,{method:expected===null?'POST':'PATCH',headers,body:JSON.stringify(payload)});
-  const rows=await response.json();if(!cloudSessionMatches(c,epoch))return;
-  if(!Array.isArray(rows)||rows.length!==1){const remote=await fetchCloudRow(c);if(remote&&cloudSessionMatches(c,epoch))showCloudConflict(remote,c);return;}
-  const latest=loadCloud();latest.remoteRev=nextRev;latest.lastPushAt=Date.now();latest.lastUid=c.session.uid;latest.bound=true;
-  latest.dirty=(DB._rev||0)!==originalRev;latest.status=latest.dirty?'idle':'ok';
-  if(!latest.dirty){DB._rev=nextRev;persist(false);}saveCloud(latest);
+  const r=await cloudFetch(url,{method:expected===null?'POST':'PATCH',headers,body:JSON.stringify({id:'main',user_id:c.session.uid,data,rev:nextRev,device:c.device,updated_at:new Date().toISOString()})});
+  const rows=await r.json();if(!cloudSessionMatches(c,epoch))return;
+  if(!Array.isArray(rows)||rows.length!==1){
+    const latest=await fetchCloudRow(c);if(!cloudSessionMatches(c,epoch))return;
+    if(!latest)throw Error('云端记录已删除，请重新读取');
+    rejectCloudMutation('云端已有更新，已采用最新记录；本次旧版本修改未提交',latest,c);return;
+  }
+  cloudAccepted={data:cloudClone(rows[0].data||data),rev:Number(rows[0].rev)||nextRev};
+  DB._rev=cloudAccepted.rev;cloudPending=generation!==cloudGeneration;cacheConfirmedCloud();
+  const latest=loadCloud();latest.remoteRev=cloudAccepted.rev;latest.lastPushAt=Date.now();latest.lastUid=c.session.uid;latest.bound=true;latest.dirty=false;latest.status=cloudPending?'pushing':'ok';saveCloud(latest);
+  if(!cloudPending){cloudFallback=cloudClone(DB);authorityMessage('');const state=$('#saveState');if(state&&!editorSession?.hasDraft()){state.textContent='已保存到云端';state.classList.remove('saving');}toast('已保存到云端');}
 }
 async function syncCloud(){
-  let c=loadCloud();if(storageBlocked||!c.enabled||!c.session||cloudBusy||applyingRemote)return;
+  let c=loadCloud();if(storageBlocked||!c.enabled||!c.session||cloudBusy||applyingRemote||navigator.onLine===false)return;
   cloudBusy=true;const epoch=cloudEpoch;
   try{
-    if(!(await ensureToken()))throw Error('登录已失效，请重新登录');c=loadCloud();if(!cloudSessionMatches(c,epoch))return;
-    const remote=await fetchCloudRow(c);if(!cloudSessionMatches(c,epoch))return;
+    if(!await ensureToken())throw Error('登录已失效，请重新登录');c=loadCloud();if(!cloudSessionMatches(c,epoch))return;
+    let remote=await fetchCloudRow(c);if(!cloudSessionMatches(c,epoch))return;
     if(!remote){
-      if(c.lastUid&&c.lastUid!==c.session.uid){
-        setCloudStatus('conflict');cloudConflict={remote:{rev:0,data:{todos:[],notes:[]}},uid:c.session.uid,epoch,empty:true};
-        if(!$('#modalMask').classList.contains('show')){
-          $('#modalMask').innerHTML=`<div class="modal" role="dialog" aria-modal="true" tabindex="-1"><div class="modal-head"><h3>进入新账号的数据空间</h3></div><div class="modal-body"><p>此账号云端为空，本机仍有上一账号的内容。先下载本机完整备份，再为新账号建立空白空间。</p></div><div class="modal-foot"><button class="btn" data-act="close-modal">稍后处理</button><button class="btn btn-primary" id="empty-account-confirm">备份并进入新账号</button></div></div>`;
-          $('#modalMask').classList.add('show');$('#empty-account-confirm').onclick=initializeEmptyAccount;
-        }return;
-      }
-      await writeCloud(c,null,epoch);return;
+      // Empty accounts start empty. Old browser caches are never imported implicitly.
+      if(cloudPending){rejectCloudMutation('云端记录已删除，本次修改未提交');}
+      const empty=migrate({}),rev=Date.now();empty._rev=rev;
+      const r=await cloudFetch(cloudBase(c)+'/rest/v1/zxj_sync',{method:'POST',headers:{...cloudHeaders(c),Prefer:'resolution=ignore-duplicates,return=representation'},body:JSON.stringify({id:'main',user_id:c.session.uid,data:empty,rev,device:c.device})});
+      await r.json();if(!cloudSessionMatches(c,epoch))return;remote=await fetchCloudRow(c);if(!cloudSessionMatches(c,epoch))return;if(!remote)throw Error('无法建立云端空白记录');
     }
-    const rRev=Number(remote.rev)||0,dirty=localDirty(c);
-    if(!c.bound){
-      if(c.lastUid&&c.lastUid!==c.session.uid){if(!cloudEditing())applyCloudRow(remote,c);return;}
-      if(dirty){showCloudConflict(remote,c);return;}
-      if(!cloudEditing())applyCloudRow(remote,c);return;
+    if(!cloudReady||cloudScope!==authorityScope(c)){
+      if(c.dirty)retainUnsentDraft();applyCloudRow(remote,c);return;
     }
-    if(rRev!==(c.remoteRev||0)){
-      if(dirty){showCloudConflict(remote,c);return;}
-      if(!cloudEditing())applyCloudRow(remote,c);return;
+    if(Number(remote.rev)!==cloudAccepted.rev){
+      if(cloudPending)rejectCloudMutation('云端已有更新，已采用最新记录；本次旧版本修改未提交',remote,c);
+      else if(!cloudEditing())applyCloudRow(remote,c);
+      // Keep an active editor's base revision; saving it must pass CAS or be rejected.
+      return;
     }
-    if(dirty){await writeCloud(c,rRev,epoch);return;}
-    setCloudStatus('ok');
-  }catch(e){if(cloudSessionMatches(c,epoch))markCloudErr(e.message);}
-  finally{cloudBusy=false;}
-}
-async function initializeEmptyAccount(){
-  const c=loadCloud(),conflict=cloudConflict;if(!conflict?.empty||cloudBusy||c.session?.uid!==conflict.uid)return;
-  cloudBusy=true;
-  try{flushEditor();const rev=DB._rev,backup=await makeBackup();download('知行记-切换账号前备份.json',JSON.stringify(backup),'application/json');
-    if(DB._rev!==rev||!cloudSessionMatches(c,conflict.epoch))throw Error('数据或账号已变化，请重试');
-    const row=await fetchCloudRow(c);if(row)throw Error('新账号云端已有数据，请重新同步');
-    if(!cloudSessionMatches(c,conflict.epoch))return;
-    disposeEditor();const old=DB;DB=migrate({});DB._rev=Date.now();applyDevicePreferences();
-    if(!persist(false)){DB=old;throw Error('本机保存失败');}
-    const latest=loadCloud();latest.lastUid=c.session.uid;latest.remoteRev=0;latest.dirty=true;latest.bound=false;saveCloud(latest);
-    cloudConflict=null;ui.editingNote=null;closeModal();rerenderCurrent();await writeCloud(latest,null,conflict.epoch);
-  }catch(e){toast(e.message);}finally{cloudBusy=false;}
+    if(cloudPending){await writeCloud(c,cloudAccepted.rev,epoch);return;}
+    setCloudStatus('ok');authorityMessage('');
+  }catch(e){if(cloudSessionMatches(c,epoch)){
+    if(cloudPending)rejectCloudMutation('保存结果未确认，已停止补写；请重新读取云端后核对');
+    cloudReady=false;markCloudErr(e.message);
+  }}finally{cloudBusy=false;if(cloudPending&&cloudSessionMatches(c,epoch))queueMicrotask(syncCloud);}
 }
 async function pushCloud(){return syncCloud();}
 async function pullCloud(){return syncCloud();}
-function markCloudErr(msg){setCloudStatus('error');if(Date.now()-cloudErrToastAt>15000){cloudErrToastAt=Date.now();toast('云同步未完成：'+msg+'；本机内容已保留');}}
-function startCloudLoop(){if(cloudLoopTimer)clearInterval(cloudLoopTimer);syncCloud();cloudLoopTimer=setInterval(()=>{if(!document.hidden&&navigator.onLine!==false)syncCloud();},25000);}
-async function resolveCloudConflict(choice){
-  const conflict=cloudConflict;let c=loadCloud();if(!conflict||conflict.uid!==c.session?.uid||cloudBusy)return;
-  cloudBusy=true;
-  try{
-    flushEditor();const rev=DB._rev;
-    if(!await ensureToken())throw Error('登录已过期，请重新登录再选择云端');c=loadCloud();
-    if(!cloudSessionMatches(c,conflict.epoch))throw Error('账号已切换，请重新同步');
-    const keepBackup=document.querySelector('#cloud-keep-backup')?.checked!==false;
-    if(keepBackup)await storeCloudRecovery();
-    const remote=await fetchCloudRow(c);if(!cloudSessionMatches(c,conflict.epoch)||!remote)throw Error('会话或云端数据已变化，请重新同步');
-    if(DB._rev!==rev)throw Error('备份期间本机又有修改，请重试');
-    if(Number(remote.rev)!==Number(conflict.remote.rev)){cloudConflict={...conflict,remote};throw Error('云端又有更新，请关闭弹窗并重新同步后选择');}
-    if(choice==='remote'){closeModal();applyCloudRow(remote,c);}
-    else{if(keepBackup)await blobPut('cloud-recovery-remote',new Blob([JSON.stringify(remote.data)],{type:'application/json'}));await writeCloud(c,Number(remote.rev)||0,conflict.epoch);if(loadCloud().status!=='conflict')closeModal();}
-    if(cloudConflict===conflict)cloudConflict=null;
-    if(!cloudConflict)toast(keepBackup?'同步已完成；切换前快照可在「我的」导出':'同步已完成，本次未创建切换前快照');
-  }catch(e){toast(syncErrorMessage(e));}finally{cloudBusy=false;}
+function markCloudErr(msg){setCloudStatus('error');authorityMessage('云端未确认：'+msg+'。请重新读取云端后再操作');}
+function startCloudLoop(){
+  if(cloudLoopTimer)clearInterval(cloudLoopTimer);
+  resetCloudAuthority();authorityMessage('正在读取最新云端记录，暂不可修改');syncCloud();
+  cloudLoopTimer=setInterval(()=>{if(!document.hidden&&navigator.onLine!==false)syncCloud();},25000);
 }
+// Compatibility with older buttons: no local-overwrite path remains.
+function showCloudConflict(){return syncCloud();}
+async function resolveCloudConflict(){return syncCloud();}
+async function initializeEmptyAccount(){return syncCloud();}
 
 function fmtSyncTime(ts){if(!ts)return '尚未';const d=new Date(ts);return d.getMonth()+1+'月'+d.getDate()+'日 '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
 function copyText(txt,okMsg){
@@ -3427,7 +3450,7 @@ function openCloudModal(){
         <div class="cl-acc"><span class="cl-dot on"></span><b>${esc(c.session.email||'已登录账号')}</b></div>
         <div class="cl-sub">同步状态：${cloudStateText(c.status==='idle'?'ok':c.status)} · 设备 ${c.device}</div>
         <div class="cl-sub">上次上传 ${fmtSyncTime(c.lastPushAt)} · 上次拉取 ${fmtSyncTime(c.lastPullAt)}</div>
-        <div class="cl-sub">离线修改保存在本机；并发修改需选择保留版本，不会静默覆盖。附件支持私有云存储；首次使用请到「我的 → 附件跨设备同步」初始化。</div>
+        <div class="cl-sub">云端为准：登录读取最新记录；修改须联网并经云端确认。其他设备已更新时自动采用云端，不补写旧修改。附件支持私有云存储；首次使用请到「我的 → 附件跨设备同步」初始化。</div>
       </div>`:`
       <div class="cl-login-box">
         <div class="field" style="margin-bottom:10px"><label>邮箱</label><input type="email" id="cl-email" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="you@example.com"></div>
@@ -3437,7 +3460,7 @@ function openCloudModal(){
 
     </div>
     <div class="modal-foot">
-      <div class="mf-l">${logged?'<button class="btn btn-ghost" data-act="cl-sync-now">立即同步</button><button class="btn btn-ghost" data-act="cl-resolve">处理版本冲突</button><button class="btn btn-ghost" data-act="cl-logout">退出登录</button>':''}</div>
+      <div class="mf-l">${logged?'<button class="btn btn-ghost" data-act="cl-sync-now">立即同步</button><button class="btn btn-ghost" data-act="cl-logout">退出登录</button>':''}</div>
       <div class="mf-r">
         <button class="btn btn-ghost" data-act="close-modal">关闭</button>
         ${logged?'':`<button class="btn btn-ghost" data-act="cl-signin">登录账号</button><button class="btn-primary btn" data-act="cl-signup">注册账号</button>`}
@@ -3479,7 +3502,7 @@ async function cloudResend(){
   catch(e){toast('重发失败：'+friendlyAuthErr(e.message));}
 }
 function cloudLogout(){
-  sbSignOut();openCloudModal();renderMe();toast('已退出登录，数据仍保存在本机');
+  sbSignOut();openCloudModal();renderMe();toast('已退出登录，记录保存在云端');
 }
 window.addEventListener('online',()=>{const c=loadCloud();if(c.enabled)pullCloud();});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=loadCloud();if(c.enabled)pullCloud();}});
