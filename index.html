@@ -781,6 +781,20 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
   .modal-mask.show~.tabbar{visibility:hidden;}
 }
 
+.editor-top .title-input{min-width:0;}
+.editor-actions{display:flex;align-items:center;gap:12px;flex-shrink:0;}
+.editor-actions .save-state{padding-top:0;}
+.notes-wrap.note-fullscreen{position:fixed;inset:0;z-index:80;display:block;margin:0;width:100%;height:100vh;height:100dvh;background:var(--bg);overflow:hidden;}
+.notes-wrap.note-fullscreen .note-list-pane{display:none;}
+.notes-wrap.note-fullscreen .note-edit-pane{display:block;width:100%;height:100%;box-sizing:border-box;padding:20px max(24px,calc((100vw - 1100px)/2)) 40px;overflow-y:auto;overscroll-behavior:contain;}
+.note-fullscreen .editor-body{min-height:calc(100dvh - 250px);overflow-wrap:anywhere;}
+@media(max-width:600px){
+  .editor-top{flex-wrap:wrap;}
+  .editor-top .title-input{flex-basis:100%;}
+  .editor-actions{width:100%;justify-content:space-between;}
+  .notes-wrap.note-fullscreen .note-edit-pane{padding:16px 18px calc(24px + env(safe-area-inset-bottom));}
+}
+
 </style>
 <link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icon-192.png"><meta name="theme-color" content="#28386c"><meta name="apple-mobile-web-app-capable" content="yes">
 </head>
@@ -1362,7 +1376,7 @@ function go(r){flushEditor();location.hash='#/'+r;}
 window.addEventListener('hashchange',renderRoute);
 function renderRoute(){
   flushEditor();
-  const r=currentRoute();
+  const r=currentRoute();if(r!=='notes')ui.noteFullscreen=false;
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.dataset.view===r));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.to===r));
   document.querySelectorAll('.tb-item').forEach(n=>n.classList.toggle('active',n.dataset.to===r));
@@ -1702,7 +1716,7 @@ function renderNotes(){
   if(q)list=list.filter(n=>(n.title||'').toLowerCase().includes(q)||stripHtml(n.content).toLowerCase().includes(q)
     ||n.tags.some(t=>t.toLowerCase().includes(q))||n.attachments&&n.attachments.some(a=>a.name.toLowerCase().includes(q)));
   const pinned=list.filter(n=>n.pinned),recent=list.filter(n=>!n.pinned);
-  const cur=ui.editingNote?noteById(ui.editingNote):null;
+  const cur=ui.editingNote?noteById(ui.editingNote):null;if(!cur)ui.noteFullscreen=false;
   const group=(arr,label,key)=>{
     if(!arr.length)return '';
     const pages=Math.max(1,Math.ceil(arr.length/PAGE_SIZE));
@@ -1716,7 +1730,7 @@ function renderNotes(){
     </div>`).join('')+pager(key,arr.length);
   };
   $('#view-notes').innerHTML=`
-  <div class="notes-wrap ${cur?'editing':''}" id="notesWrap">
+  <div class="notes-wrap ${cur?'editing':''} ${cur&&ui.noteFullscreen?'note-fullscreen':''}" id="notesWrap">
     <div class="note-list-pane">
       <div class="search-box">${I.search}<input id="note-search" data-act="note-search" value="${esc(ui.noteQuery)}" placeholder="搜索标题、正文、标签、文件名"></div>
       <button class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:10px" data-act="new-note">${I.plus}新建笔记</button>
@@ -1734,7 +1748,7 @@ function editorHtml(n){
   return `
     <div class="editor-top">
       <input class="title-input" id="ed-title" data-id="${n.id}" value="${esc(n.title)}" placeholder="请输入标题">
-      <div class="save-state" id="saveState">已保存</div>
+      <div class="editor-actions"><div class="save-state" id="saveState" role="status">已保存</div><button class="btn btn-ghost" data-act="note-fullscreen" aria-pressed="${!!ui.noteFullscreen}" title="${ui.noteFullscreen?'退出全屏（Esc）':'全屏编辑'}">${ui.noteFullscreen?'退出全屏':'全屏编辑'}</button></div>
     </div>
     <div class="editor-toolbar">
       <button class="tb-btn" title="加粗" data-act="ed-cmd" data-cmd="bold">${I.bold}</button>
@@ -1767,9 +1781,19 @@ function editorHtml(n){
       <button class="btn btn-ghost" data-act="back-list">${I.chevL}返回列表</button>
     </div>`;
 }
+function toggleNoteFullscreen(force){
+  const wrap=$('#notesWrap');
+  if(!wrap||!$('#ed-body'))return;
+  ui.noteFullscreen=typeof force==='boolean'?force:!ui.noteFullscreen;
+  wrap.classList.toggle('note-fullscreen',ui.noteFullscreen);
+  const button=$('[data-act="note-fullscreen"]');
+  if(button){button.textContent=ui.noteFullscreen?'退出全屏':'全屏编辑';button.setAttribute('aria-pressed',String(ui.noteFullscreen));button.title=ui.noteFullscreen?'退出全屏（Esc）':'全屏编辑';}
+}
 function bindEditor(n){
   disposeEditor();
   const body=$('#ed-body'),title=$('#ed-title'),state=$('#saveState');body.innerHTML=sanitizeHtml(n.content||'');
+  state.textContent=cloudPending?'正在保存到云端…':cloudReady?'已保存到云端':'尚未连接云端';
+  state.classList.toggle('saving',cloudPending);
   let dirty=false,closed=false;
   const doSave=()=>{
     if(closed||!dirty)return;
@@ -2520,6 +2544,7 @@ document.addEventListener('click',e=>{
     }
     case 'new-note': createNote();break;
     case 'open-note': openNote(d.id);break;
+    case 'note-fullscreen': toggleNoteFullscreen();break;
     case 'back-list': if(window._flushEditor)window._flushEditor();ui.editingNote=null;renderNotes();break;
     case 'toggle-pin':{const n=noteById(d.id);n.pinned=!n.pinned;n.updatedAt=Date.now();persist();renderNotes();toast(n.pinned?'已置顶':'已取消置顶');break;}
     case 'del-tag':{const n=noteById(ui.editingNote);n.tags=n.tags.filter(x=>x!==d.tag);persist();renderNotes();break;}
@@ -2613,7 +2638,7 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('keydown',e=>{
   if(e.isComposing)return;
-  if(e.key==='Escape'){closeModal();document.querySelectorAll('details.mini-menu[open]').forEach(x=>x.open=false);}
+  if(e.key==='Escape'){if(ui.noteFullscreen&&!$('#modalMask').classList.contains('show')){toggleNoteFullscreen(false);$('[data-act="note-fullscreen"]')?.focus();}closeModal();document.querySelectorAll('details.mini-menu[open]').forEach(x=>x.open=false);}
   const el=e.target;
   if(el.dataset&&el.dataset.act==='add-todo-input'&&e.key==='Enter'){
     const v=el.value.trim();if(!v)return;
@@ -3316,7 +3341,7 @@ function authorityMessage(msg){
   cloudNotice=msg;
   let el=document.getElementById('cloud-authority-state');
   if(!el){el=document.createElement('div');el.id='cloud-authority-state';el.setAttribute('role','status');el.style.cssText='position:fixed;bottom:82px;left:50%;transform:translateX(-50%);z-index:9999;max-width:90vw;padding:9px 14px;background:#28386c;color:white;border-radius:10px;font-size:13px;pointer-events:none';document.body.appendChild(el);}
-  el.textContent=msg;el.hidden=!msg;
+  el.textContent=msg;el.hidden=!msg||(msg==='正在保存到云端，请勿关闭页面…'&&currentRoute()==='notes'&&!!$('#saveState'));
 }
 function cacheConfirmedCloud(){
   // Cache confirmed data, including device preferences; never persist an optimistic DB.
@@ -3389,7 +3414,7 @@ async function writeCloud(c,expected,epoch){
   cloudAccepted={data:cloudClone(rows[0].data||data),rev:Number(rows[0].rev)||nextRev};
   DB._rev=cloudAccepted.rev;cloudPending=generation!==cloudGeneration;cacheConfirmedCloud();
   const latest=loadCloud();latest.remoteRev=cloudAccepted.rev;latest.lastPushAt=Date.now();latest.lastUid=c.session.uid;latest.bound=true;latest.dirty=false;latest.status=cloudPending?'pushing':'ok';saveCloud(latest);
-  if(!cloudPending){cloudFallback=cloudClone(DB);authorityMessage('');const state=$('#saveState');if(state&&!editorSession?.hasDraft()){state.textContent='已保存到云端';state.classList.remove('saving');}toast('已保存到云端');}
+  if(!cloudPending){cloudFallback=cloudClone(DB);authorityMessage('');const state=currentRoute()==='notes'?$('#saveState'):null;if(state&&!editorSession?.hasDraft()){state.textContent='已保存到云端';state.classList.remove('saving');}if(!state)toast('已保存到云端');}
 }
 async function syncCloud(){
   let c=loadCloud();if(storageBlocked||!c.enabled||!c.session||cloudBusy||applyingRemote||navigator.onLine===false)return;
