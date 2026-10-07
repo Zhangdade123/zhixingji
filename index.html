@@ -784,9 +784,27 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 .editor-top .title-input{min-width:0;}
 .editor-actions{display:flex;align-items:center;gap:12px;flex-shrink:0;}
 .editor-actions .save-state{padding-top:0;}
+.editor-toolbar{gap:4px;flex-wrap:wrap;overflow:visible;}
+.editor-toolbar .tb-text{width:auto;min-width:36px;padding:0 8px;font-size:13px;}
+.editor-toolbar button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.editor-body{font-size:17px;line-height:1.8;overflow-wrap:anywhere;}
+.editor-body p,.editor-body>div{margin:0 0 .85em;}
+.editor-body h1{font-size:1.65em;line-height:1.4;margin:1.3em 0 .55em;}
+.editor-body h2{font-size:1.35em;line-height:1.45;margin:1.2em 0 .5em;}
+.editor-body h3{font-size:1.15em;line-height:1.5;font-weight:600;margin:1.1em 0 .45em;}
+.editor-body>:first-child{margin-top:0;}
+.editor-body ul,.editor-body ol{margin:.6em 0 .85em;padding-left:1.6em;}
+.editor-body li{margin:.25em 0;}
+.editor-body li>ul,.editor-body li>ol{margin:.2em 0;}
+.editor-body ul ul{list-style:circle;}.editor-body ul ul ul{list-style:square;}
+.editor-body a{color:var(--accent);text-decoration:underline;}
+.editor-body pre{white-space:pre-wrap;padding:12px;background:var(--accent-weak);border-radius:8px;}
+.editor-body table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;}
+.editor-body td,.editor-body th{border:1px solid var(--border);padding:6px 10px;}
+.editor-body img{display:block;margin:16px auto;}
 .notes-wrap.note-fullscreen{position:fixed;inset:0;z-index:80;display:block;margin:0;width:100%;height:100vh;height:100dvh;background:var(--bg);overflow:hidden;}
 .notes-wrap.note-fullscreen .note-list-pane{display:none;}
-.notes-wrap.note-fullscreen .note-edit-pane{display:block;width:100%;height:100%;box-sizing:border-box;padding:20px max(24px,calc((100vw - 1100px)/2)) 40px;overflow-y:auto;overscroll-behavior:contain;}
+.notes-wrap.note-fullscreen .note-edit-pane{display:block;width:100%;height:100%;box-sizing:border-box;padding:20px max(24px,calc((100vw - 900px)/2)) 40px;overflow-y:auto;overscroll-behavior:contain;}
 .note-fullscreen .editor-body{min-height:calc(100dvh - 250px);overflow-wrap:anywhere;}
 @media(max-width:600px){
   .editor-top{flex-wrap:wrap;}
@@ -1750,16 +1768,16 @@ function editorHtml(n){
       <input class="title-input" id="ed-title" data-id="${n.id}" value="${esc(n.title)}" placeholder="请输入标题">
       <div class="editor-actions"><div class="save-state" id="saveState" role="status">已保存</div><button class="btn btn-ghost" data-act="note-fullscreen" aria-pressed="${!!ui.noteFullscreen}" title="${ui.noteFullscreen?'退出全屏（Esc）':'全屏编辑'}">${ui.noteFullscreen?'退出全屏':'全屏编辑'}</button></div>
     </div>
-    <div class="editor-toolbar">
+    <div class="editor-toolbar" role="toolbar" aria-label="笔记文字格式">
       <button class="tb-btn" title="加粗" data-act="ed-cmd" data-cmd="bold">${I.bold}</button>
-      <button class="tb-btn" title="一级标题" data-act="ed-cmd" data-cmd="h1">H1</button>
+      <button class="tb-btn tb-text" title="正文段落" data-act="ed-cmd" data-cmd="p">正文</button><button class="tb-btn" title="一级标题" data-act="ed-cmd" data-cmd="h1">H1</button>
       <button class="tb-btn" title="二级标题" data-act="ed-cmd" data-cmd="h2">H2</button>
-      <span class="tb-sep"></span>
+      <button class="tb-btn" title="三级标题" data-act="ed-cmd" data-cmd="h3">H3</button><button class="tb-btn" title="斜体" aria-label="斜体" data-act="ed-cmd" data-cmd="italic"><em>I</em></button><button class="tb-btn" title="删除线" aria-label="删除线" data-act="ed-cmd" data-cmd="strikeThrough"><s>S</s></button><span class="tb-sep"></span>
       <button class="tb-btn" title="无序列表" data-act="ed-cmd" data-cmd="insertUnorderedList">${I.ul}</button>
       <button class="tb-btn" title="有序列表" data-act="ed-cmd" data-cmd="insertOrderedList">${I.ol}</button>
       <button class="tb-btn" title="引用" data-act="ed-cmd" data-cmd="quote">${I.quote}</button>
       <span class="tb-sep"></span>
-      <button class="tb-btn" title="插入图片" data-act="ed-image">${I.img}</button>
+      <button class="tb-btn tb-text" title="列表增加缩进（Tab）" data-act="ed-cmd" data-cmd="indent">缩进</button><button class="tb-btn tb-text" title="列表减少缩进（Shift+Tab）" data-act="ed-cmd" data-cmd="outdent">减少缩进</button><button class="tb-btn tb-text" title="撤销（Ctrl/Cmd+Z）" data-act="ed-cmd" data-cmd="undo">撤销</button><button class="tb-btn tb-text" title="重做" data-act="ed-cmd" data-cmd="redo">重做</button><button class="tb-btn tb-text" title="清除选中文字样式并恢复正文段落" data-act="ed-cmd" data-cmd="clear">清除格式</button><span class="tb-sep"></span><button class="tb-btn" title="插入图片" data-act="ed-image">${I.img}</button>
       <button class="tb-btn" title="添加文件" data-act="ed-file">${I.file}</button>
       <input type="file" id="ed-image-input" accept="image/*" hidden multiple>
       <input type="file" id="ed-file-input" hidden multiple>
@@ -1780,6 +1798,20 @@ function editorHtml(n){
       <button class="btn btn-danger-ghost" data-act="remove-note" data-id="${n.id}">${I.trash}删除（进回收站）</button>
       <button class="btn btn-ghost" data-act="back-list">${I.chevL}返回列表</button>
     </div>`;
+}
+function cleanPastedNote(html,text){
+  if(!html)return text.replace(/\r\n?/g,'\n').split('\n').map(line=>'<p>'+(esc(line)||'<br>')+'</p>').join('');
+  const doc=document.createElement('template');doc.innerHTML=html;
+  // Preserve semantic emphasis from Word/web spans without importing their visual styles.
+  doc.content.querySelectorAll('span').forEach(el=>{
+    const style=el.style;let tags=[];
+    if(style.fontWeight==='bold'||Number(style.fontWeight)>=600)tags.push('strong');
+    if(style.fontStyle==='italic')tags.push('em');
+    if(style.textDecoration.includes('line-through'))tags.push('s');
+    for(const tag of tags){const wrapper=document.createElement(tag);wrapper.append(...el.childNodes);el.append(wrapper);}
+  });
+  const holder=document.createElement('div');holder.append(doc.content);
+  return sanitizeHtml(holder.innerHTML);
 }
 function toggleNoteFullscreen(force){
   const wrap=$('#notesWrap');
@@ -1805,10 +1837,23 @@ function bindEditor(n){
   const onChange=()=>{dirty=true;state.textContent='正在保存…';state.classList.add('saving');autoSave();};
   editorSession={hasDraft:()=>dirty,flush:()=>{autoSave.cancel();doSave();},cancel:()=>{autoSave.cancel();closed=true;}};
   window._flushEditor=()=>editorSession?.flush();
+  let selectionRange=null;
+  const rememberSelection=()=>{const sel=getSelection();if(sel.rangeCount&&body.contains(sel.anchorNode)&&body.contains(sel.focusNode))selectionRange=sel.getRangeAt(0).cloneRange();};
+  body.addEventListener('keyup',rememberSelection);body.addEventListener('mouseup',rememberSelection);body.addEventListener('focusout',rememberSelection);
+  editorSession.restoreSelection=()=>{body.focus();if(selectionRange&&body.contains(selectionRange.commonAncestorContainer)){const sel=getSelection();sel.removeAllRanges();sel.addRange(selectionRange);}document.execCommand('styleWithCSS',false,false);};
+  const toolbar=$('.editor-toolbar');
+  toolbar.addEventListener('mousedown',e=>{if(e.target.closest('[data-act="ed-cmd"]')){rememberSelection();e.preventDefault();}});
+  body.addEventListener('focus',()=>document.execCommand('defaultParagraphSeparator',false,'p'));
   body.addEventListener('input',onChange);title.addEventListener('input',onChange);
-  body.addEventListener('paste',e=>{e.preventDefault();const html=e.clipboardData.getData('text/html');const text=e.clipboardData.getData('text/plain');document.execCommand('insertHTML',false,html?sanitizeHtml(html):esc(text).replace(/\n/g,'<br>'));onChange();});
+  body.addEventListener('paste',e=>{e.preventDefault();const html=e.clipboardData.getData('text/html');const text=e.clipboardData.getData('text/plain');document.execCommand('insertHTML',false,cleanPastedNote(html,text));onChange();rememberSelection();});
   body.addEventListener('drop',e=>e.preventDefault());
-  body.addEventListener('keydown',e=>{if(e.key==='Tab'&&!e.isComposing){e.preventDefault();document.execCommand('insertHTML',false,'&emsp;&emsp;');onChange();}});
+  body.addEventListener('keydown',e=>{
+    if(e.isComposing)return;
+    if(e.key==='Tab'){
+      const sel=getSelection(),node=sel.anchorNode,el=node?.nodeType===1?node:node?.parentElement;
+      if(el?.closest('li')&&body.contains(el.closest('li'))){e.preventDefault();execEdit(e.shiftKey?'outdent':'indent');}
+    }
+  });
   $('#ed-image-input').addEventListener('change',e=>[...e.target.files].forEach(f=>compressInsert(f,body,onChange)));
   $('#ed-file-input').addEventListener('change',async e=>{
     const files=[...e.target.files];flushEditor();const ok=await checkFileSize(files);
@@ -1837,11 +1882,21 @@ function compressInsert(file,body,cb){
   reader.readAsDataURL(file);
 }
 function execEdit(cmd){
-  const body=$('#ed-body');body.focus();
-  if(cmd==='h1'||cmd==='h2')document.execCommand('formatBlock',false,cmd);
+  const body=$('#ed-body');if(!body)return;
+  editorSession?.restoreSelection?.();
+  body.focus();
+  if(['p','h1','h2','h3'].includes(cmd))document.execCommand('formatBlock',false,cmd);
   else if(cmd==='quote')document.execCommand('formatBlock',false,'blockquote');
-  else document.execCommand(cmd,false,null);
+  else if(cmd==='clear'){
+    document.execCommand('removeFormat',false,null);
+    document.execCommand('formatBlock',false,'p');
+  }else if(cmd==='indent'||cmd==='outdent'){
+    const sel=getSelection(),node=sel.anchorNode,el=node?.nodeType===1?node:node?.parentElement;
+    if(!el?.closest('li')||!body.contains(el.closest('li')))return;
+    document.execCommand(cmd,false,null);
+  }else document.execCommand(cmd,false,null);
   body.dispatchEvent(new Event('input',{bubbles:true}));
+  body.dispatchEvent(new Event('keyup'));
 }
 
 /* ============================================================
