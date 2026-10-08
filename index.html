@@ -813,6 +813,17 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
   .notes-wrap.note-fullscreen .note-edit-pane{padding:16px 18px calc(24px + env(safe-area-inset-bottom));}
 }
 
+.review-status-head{margin:-20px -22px 12px;padding:14px 22px;border-radius:16px 16px 0 0;}
+.review-status-head.review-done{background:var(--accent);}
+.review-status-head.review-pending{background:#c43d4b;}
+.review-status-head h3,.review-status-head .ch-count{color:#fff;}
+.todo-delete{display:grid;place-items:center;width:32px;height:32px;border-radius:8px;color:var(--muted);flex-shrink:0;}
+.todo-delete svg{width:16px;height:16px;}
+.todo-delete:hover,.todo-delete:focus-visible{color:#c43d4b;background:#fff0f1;}
+.attachment-paste{font-size:13px;padding:6px 10px;margin:4px 0;}
+.attachment-paste:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+@media(max-width:760px){.review-status-head{margin:-16px -16px 12px;padding:14px 16px;border-radius:14px 14px 0 0;}}
+
 </style>
 <link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icon-192.png"><meta name="theme-color" content="#28386c"><meta name="apple-mobile-web-app-capable" content="yes">
 </head>
@@ -866,6 +877,42 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 <div class="toast-root" id="toastRoot"></div>
 
 <script>
+function pasteAttachmentButton(target){return `<button type="button" class="btn btn-ghost attachment-paste" data-act="paste-attachment" data-target="${target}" title="粘贴已复制的文件，也可聚焦此按钮后按 Ctrl+V">一键粘贴附件</button>`;}
+function acceptPastedAttachments(input,files){
+  if(!input?.isConnected){toast('附件区域已关闭，请重新粘贴');return;}
+  if(!files.length){toast('未读取到文件。请复制文献文件后按 Ctrl+V；若仍不可用，请拖拽或选择文件');return;}
+  const transfer=new DataTransfer();files.forEach(file=>transfer.items.add(file));
+  input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));
+}
+async function pasteAttachments(button){
+  const input=document.getElementById(button.dataset.target),epoch=cloudEpoch;
+  button.focus();button.disabled=true;
+  try{
+    if(!navigator.clipboard?.read)throw Error('clipboard unavailable');
+    const items=await navigator.clipboard.read(),files=[];
+    for(const item of items){
+      const type=item.types.find(t=>!t.startsWith('text/')&&!t.startsWith('web '));
+      if(!type)continue;
+      const blob=await item.getType(type);
+      const ext=({'application/pdf':'pdf','image/png':'png','image/jpeg':'jpg','application/msword':'doc','application/vnd.openxmlformats-officedocument.wordprocessingml.document':'docx'})[type]||'bin';
+      files.push(blob instanceof File?blob:new File([blob],'粘贴附件-'+Date.now()+'-'+(files.length+1)+'.'+ext,{type}));
+    }
+    if(epoch!==cloudEpoch||!button.isConnected)return;
+    acceptPastedAttachments(input,files);
+  }catch{
+    if(button.isConnected){toast('浏览器未允许直接读取文件，请在此处按 Ctrl+V，或拖拽、选择文件');}
+  }finally{if(button.isConnected){button.disabled=false;button.focus();}}
+}
+document.addEventListener('paste',e=>{
+  const button=e.target.closest?.('[data-act="paste-attachment"]');
+  const region=e.target.closest?.('.modal,#noteEditPane,.quick-note');
+  const input=button?document.getElementById(button.dataset.target):region?.querySelector('#mf-files,#nt-files,#ed-file-input,#qn-file-input');
+  if(!input)return;
+  const files=[...(e.clipboardData?.files||[])];
+  if(files.length){e.preventDefault();e.stopImmediatePropagation();acceptPastedAttachments(input,files);}
+  else if(button){e.preventDefault();acceptPastedAttachments(input,[]);}
+},true);
+
 function backgroundPushKey(){const c=loadCloud();return 'zxj-background-enabled:'+cloudBase(c)+':'+(c.session?.uid||'local')+':'+c.device;}
 function backgroundPushEnabled(){return !!loadCloud().session&&safeGet(backgroundPushKey())==='true';}
 async function reminderPushAPI(action,extra={}){
@@ -1516,7 +1563,7 @@ function renderHome(){
         <div class="qn-drop-hint">${I.upcloud}松开鼠标即可添加文件</div>
         <div class="qn-foot">
           <div class="qn-left">
-            <label class="qn-upload">${I.attach}添加文件<input type="file" id="qn-file-input" hidden multiple></label>
+            ${pasteAttachmentButton('qn-file-input')}<label class="qn-upload">${I.attach}添加文件<input type="file" id="qn-file-input" hidden multiple></label>
             <span class="qn-hint">可拖入文件 · Ctrl / ⌘ + Enter 保存</span>
           </div>
           <button class="btn btn-primary" data-act="quick-note-save">保存为笔记</button>
@@ -1632,7 +1679,7 @@ function doneRow(t){
     <div class="todo-main" data-act="open-todo" data-id="${t.id}">
       <div class="todo-title">${esc(t.title)}</div>${checklistProgress(t)}
       <div class="todo-meta">${t.date?`<span class="tag-chip">${I.cal}${relDay(t.date)}</span>`:''}<span class="tag-chip">完成于 ${fmtTime(t.doneAt)}</span></div>
-    </div><div class="todo-side">${todoMenu(t)}</div>
+    </div><div class="todo-side">${todoMenu(t)}<button class="todo-delete" data-act="remove-todo" data-id="${t.id}" aria-label="删除此事项（移入回收站）" title="删除（移入回收站）">${I.trash}</button></div>
   </li>`;
 }
 function renderTodos(){
@@ -1780,7 +1827,7 @@ function editorHtml(n){
       <button class="tb-btn tb-text" title="列表增加缩进（Tab）" data-act="ed-cmd" data-cmd="indent">缩进</button><button class="tb-btn tb-text" title="列表减少缩进（Shift+Tab）" data-act="ed-cmd" data-cmd="outdent">减少缩进</button><button class="tb-btn tb-text" title="撤销（Ctrl/Cmd+Z）" data-act="ed-cmd" data-cmd="undo">撤销</button><button class="tb-btn tb-text" title="重做" data-act="ed-cmd" data-cmd="redo">重做</button><button class="tb-btn tb-text" title="清除选中文字样式并恢复正文段落" data-act="ed-cmd" data-cmd="clear">清除格式</button><span class="tb-sep"></span><button class="tb-btn" title="插入图片" data-act="ed-image">${I.img}</button>
       <button class="tb-btn" title="添加文件" data-act="ed-file">${I.file}</button>
       <input type="file" id="ed-image-input" accept="image/*" hidden multiple>
-      <input type="file" id="ed-file-input" hidden multiple>
+      <input type="file" id="ed-file-input" hidden multiple>${pasteAttachmentButton('ed-file-input')}
       <span class="tb-label"><button class="btn-text" data-act="toggle-pin" data-id="${n.id}" style="font-size:14px">${n.pinned?'取消置顶':'置顶'}</button></span>
     </div>
     <div class="editor-body" id="ed-body" contenteditable="true" data-ph="开始书写正文……"></div>
@@ -2002,11 +2049,11 @@ function renderReview(){
     </div>
     <div class="rev-cols">
       <div class="card">
-        <div class="card-head"><h3>完成事项<span class="ch-count">${done.length}</span></h3></div>
+        <div class="card-head review-status-head review-done"><h3>完成事项<span class="ch-count">${done.length}</span></h3></div>
         ${done.length?doneP.rows.map(t=>`<div class="rev-item"><span class="rev-mark ok">${OKMARK}</span><span>${esc(t.title)}</span><span class="rt">${fmtTime(t.doneAt)}</span></div>`).join('')+doneP.pager:emptyBlock('这段时间暂无完成记录','')}
       </div>
       <div class="card">
-        <div class="card-head"><h3>未完成<span class="ch-count">${undoneAll.length}</span></h3></div>
+        <div class="card-head review-status-head review-pending"><h3>未完成<span class="ch-count">${undoneAll.length}</span></h3></div>
         ${undoneAll.length?unP.rows.map(t=>`<div class="rev-item"><button class="rev-mark wait" data-act="toggle-todo" data-id="${t.id}" title="点击标记完成" aria-label="标记完成"></button><span>${esc(t.title)}</span><span class="rt">${t.date?relDay(t.date):'待安排'}</span></div>`).join('')+unP.pager:emptyBlock('没有遗留事项，保持住','')}
       </div>
     </div>
@@ -2099,13 +2146,13 @@ async function aiGenerate(kind){
     }catch(err){
       ui.sumBusy=false;renderSummary();
       fallbackCopy(sys+'\n\n===== 以下为材料 =====\n'+ctx);
-      toast('AI 调用失败（'+err.message+'），已复制提示词，可粘贴给豆包后回填');
+      toast('AI 调用失败（'+err.message+'），已复制提示词，可粘贴给 AI后回填');
     }
   }else{
     fallbackCopy(sys+'\n\n===== 以下为材料 =====\n'+ctx);
     ui.sumDraft=ui.sumDraft||'';renderSummary();
     const ta=$('#sum-result');if(ta)ta.focus();
-    toast('未配置豆包 API Key，已复制完整提示词与材料，粘贴给豆包后把回复粘到结果框');
+    toast('未配置 AI API Key，已复制完整提示词与材料，粘贴给 AI后把回复粘到结果框');
   }
 }
 function flushSumPrompt(){
@@ -2152,7 +2199,7 @@ function renderSummary(){
   const ai=DB.settings.ai||{};
   $('#view-summary').innerHTML=`
     <div class="page-head">
-      <div><h1>阶段总结</h1><div class="sub">由豆包 AI 读取所选范围内的事项、笔记与附件，按预设提示词生成 · ${s} ~ ${e}</div></div>
+      <div><h1>阶段总结</h1><div class="sub">由AI 读取所选范围内的事项、笔记与附件，按预设提示词生成 · ${s} ~ ${e}</div></div>
       <div class="head-actions"><button class="btn btn-ghost" data-act="nav" data-to="review">${I.chevL}返回回顾</button></div>
     </div>
     <div class="card sum-range-card">
@@ -2174,19 +2221,19 @@ function renderSummary(){
       </div>
       <textarea id="sum-prompt" class="sum-prompt">${esc(promptVal)}</textarea>
       <div class="sum-gen-row">
-        <div class="sum-gen-hint">发送所选范围内的事项与笔记摘要（每篇最多 1,000 字）；附件仅发送名称，不读取文件正文。<br>${ai.key?'将通过豆包 AI 直接生成':'未配置 API Key：点击后复制提示词与材料，投喂豆包后把回复粘到结果框（可在「我的 → AI 助手」配置 Key 直连）'}</div>
+        <div class="sum-gen-hint">发送所选范围内的事项与笔记摘要（每篇最多 1,000 字）；附件仅发送名称，不读取文件正文。<br>${ai.key?'将通过AI 直接生成':'未配置 API Key：点击后复制提示词与材料，粘贴给 AI后把回复粘到结果框（可在「我的 → AI 助手」配置 Key 直连）'}</div>
         <div class="sum-gen-btns">
           <button class="btn btn-primary" data-act="sum-ai" data-k="summary" ${ui.sumBusy?'disabled':''}>${I.summary}AI 生成小结</button>
           <button class="btn btn-ghost" data-act="sum-ai" data-k="plan" ${ui.sumBusy?'disabled':''}>${I.summary}AI 生成计划建议</button>
         </div>
       </div>
     </div>
-    ${ui.sumBusy?`<div class="card sum-loading">豆包 AI 正在阅读事项与笔记，请稍候…</div>`:''}
+    ${ui.sumBusy?`<div class="card sum-loading">AI 正在阅读事项与笔记，请稍候…</div>`:''}
     ${(ui.sumDraft||ui.sumDraftKind)?`
     <div class="card">
       <div class="card-head"><h3>${ui.sumDraftKind==='plan'?sumTitle(...(ui.sumDraftRange||[s,e]),'plan')+'（草稿）':sumTitle(...(ui.sumDraftRange||[s,e]),'summary')+'（草稿）'}</h3>
         <button class="btn btn-ghost" data-act="sum-copy-draft">${I.copy}复制</button></div>
-      <textarea id="sum-result" class="sum-result" placeholder="把豆包 AI 的回复粘贴到这里，可再手动微调…">${esc(ui.sumDraft||'')}</textarea>
+      <textarea id="sum-result" class="sum-result" placeholder="把AI 的回复粘贴到这里，可再手动微调…">${esc(ui.sumDraft||'')}</textarea>
       <div class="sum-save-row"><button class="btn btn-primary" data-act="sum-save">保存为${ui.sumDraftKind==='plan'?'计划建议':'小结'}记录</button><button class="btn-text" data-act="sum-discard">放弃草稿</button></div>
     </div>`:''}
     <div class="card">
@@ -2235,7 +2282,7 @@ function renderMe(){
         <div class="ai-set-row"><label>API Key</label><input type="password" data-act="ai-setting" data-k="key" value="${esc(st.ai.key||'')}" autocomplete="off" placeholder="火山方舟 API Key，填写后总结页可一键直连生成"></div>
         <div class="ai-set-row"><label>模型 ID</label><input type="text" data-act="ai-setting" data-k="model" value="${esc(st.ai.model||'')}" placeholder="如 doubao-1-5-pro-32k-250115"></div>
         <div class="ai-set-row"><label>接口地址</label><input type="text" data-act="ai-setting" data-k="base" value="${esc(st.ai.base||'')}"></div>
-        <div class="m2" style="padding:2px 2px 0">Key 仅保存在当前浏览器，不进入备份与云同步。不填 Key 也可使用：总结页会自动复制完整提示词与材料，投喂豆包后把回复粘贴回结果框即可保存。</div>
+        <div class="m2" style="padding:2px 2px 0">Key 仅保存在当前浏览器，不进入备份与云同步。不填 Key 也可使用：总结页会自动复制完整提示词与材料，粘贴给 AI后把回复粘贴回结果框即可保存。</div>
       </div>
       <div class="me-group">
         <div class="mg-title">偏好</div>
@@ -2382,7 +2429,7 @@ function openTodo(id){
           </div>
           ${checklistEditor(t)}<div class="field" style="margin-bottom:0"><label>附件</label>
             <div class="picked-files" id="mf-picked">${t.attachments.map(a=>pickedFileHtml(a,`<button data-act="del-attach" data-id="${t.id}" data-name="${esc(a.name)}" style="color:var(--muted);display:grid;place-items:center">${I.x}</button>`)).join('')}</div>
-            <label class="drop-zone" id="mf-drop">${I.upcloud}<div>点击或拖拽文件到此处上传</div><div class="dz-sub">单个文件不超过 20MB · 保存后自动上传（需启用附件云存储）</div><input type="file" id="mf-files" hidden multiple></label>
+            ${pasteAttachmentButton('mf-files')}<label class="drop-zone" id="mf-drop">${I.upcloud}<div>点击或拖拽文件到此处上传</div><div class="dz-sub">单个文件不超过 20MB · 保存后自动上传（需启用附件云存储）</div><input type="file" id="mf-files" hidden multiple></label>
           </div>
         </div>
       </div>
@@ -2436,7 +2483,7 @@ function openNewTodo(presetDate){
           </div>
           ${checklistEditor({})}<div class="field" style="margin-bottom:0"><label>附件</label>
             <div class="picked-files" id="nt-picked"></div>
-            <label class="drop-zone" id="nt-drop">${I.upcloud}<div>点击或拖拽文件到此处上传</div><div class="dz-sub">单个文件不超过 20MB · 保存后自动上传（需启用附件云存储）</div><input type="file" id="nt-files" hidden multiple></label>
+            ${pasteAttachmentButton('nt-files')}<label class="drop-zone" id="nt-drop">${I.upcloud}<div>点击或拖拽文件到此处上传</div><div class="dz-sub">单个文件不超过 20MB · 保存后自动上传（需启用附件云存储）</div><input type="file" id="nt-files" hidden multiple></label>
           </div>
         </div>
       </div>
@@ -2560,6 +2607,7 @@ document.addEventListener('click',e=>{
     case 'mail-diagnostics': openMailDiagnostics();break;
     case 'notify-test': testNotification();break;
     case 'import-backup': chooseBackup();break;
+    case 'paste-attachment': pasteAttachments(el);break;
     case 'download-attachment': downloadAttachment(d.file);break;
     case 'upload-attachment': uploadAttachment(d.file);break;
     case 'attachment-panel': attachmentPanel();break;
