@@ -18,6 +18,13 @@ self.addEventListener('push',event=>{
   }));
 });
 self.addEventListener('notificationclick',event=>{
+  if(event.notification.data?.habitId){
+    event.notification.close();event.waitUntil((async()=>{
+      const url=new URL('./',self.registration.scope);url.hash='/home';
+      for(const client of await self.clients.matchAll({type:'window',includeUncontrolled:true})){if(client.url.startsWith(self.registration.scope)){await client.focus();client.postMessage({type:'open-habit-reminder'});return;}}
+      await self.clients.openWindow(url.href);
+    })());return;
+  }
   const id=event.notification.data?.todoId;
   event.notification.close();
   event.waitUntil((async()=>{

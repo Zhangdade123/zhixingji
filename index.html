@@ -1115,6 +1115,7 @@ function validateData(d){
       if(r.priority&&!['high','mid','low'].includes(r.priority))throw Error('优先级格式错误');
       if(r.range&&(!Array.isArray(r.range)||r.range.length!==2||r.range.some(x=>typeof x!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(x))))throw Error('总结范围格式错误');
       if(key==='habits'&&(typeof r.title!=='string'||!r.title.trim()||!r.checkins||typeof r.checkins!=='object'||Array.isArray(r.checkins)||Object.entries(r.checkins).some(([day,value])=>!/^\d{4}-\d{2}-\d{2}$/.test(day)||typeof value!=='boolean')))throw Error('打卡记录格式错误');
+      if(key==='habits'&&r.reminderTime!=null&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(r.reminderTime))throw Error('习惯提醒时间格式错误');
       if(key==='notes'&&r.content)r.content=sanitizeHtml(r.content);
     }
   }
@@ -3669,9 +3670,9 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=l
     const panel = document.createElement('section');
     panel.id = 'daily-habits'; panel.className = 'card';
     panel.innerHTML = `<h3 class="habit-heading"><button type="button" class="card-head habit-fold" aria-expanded="${!collapsed}" aria-controls="habit-content"><span>每日习惯</span><span class="habit-fold-meta"><span aria-live="polite">今日 ${done} / ${active.length} 已完成</span><span class="habit-fold-label">${collapsed ? '展开 ▾' : '收起 ▴'}</span></span></button></h3>
-      <div id="habit-content" class="habit-body" ${collapsed ? 'hidden' : ''}><p class="habit-hint">每天一小步，让好习惯慢慢发生 · ${day}（北京时间）</p>
+      <div id="habit-content" class="habit-body" ${collapsed ? 'hidden' : ''}><p class="habit-hint">每天坚持一点 · 近七天记录</p>
       <progress aria-label="今日习惯完成进度" max="${active.length || 1}" value="${done}"></progress>
-      ${active.length ? active.map(h => `<div class="habit-row"><div class="habit-info"><strong>${esc(h.title)}</strong><small>连续 ${streak(h, day)} 天 · 累计 ${Object.values(h.checkins).filter(Boolean).length} 天</small><div class="habit-week" aria-label="近七天记录">${days.map(d => `<span class="${h.checkins[d] ? 'checked' : ''}" title="${d} ${h.checkins[d] ? '已打卡' : '未打卡'}" aria-label="${d} ${h.checkins[d] ? '已打卡' : '未打卡'}">${d.slice(8)}${h.checkins[d] ? ' ✓' : ''}</span>`).join('')}</div></div><div class="habit-actions"><button class="btn ${h.checkins[day] ? 'btn-ghost' : 'btn-primary'}" data-habit-toggle="${esc(h.id)}" aria-pressed="${!!h.checkins[day]}">${h.checkins[day] ? '已打卡 · 撤销' : '完成打卡'}</button><button class="btn-text" data-habit-archive="${esc(h.id)}">停用</button></div></div>`).join('') : '<p class="habit-empty">从一个小目标开始，比如阅读 20 分钟、散步或早睡。</p>'}
+      ${active.length ? active.map(h => `<div class="habit-row todo-row ${h.checkins[day] ? 'is-done' : ''}"><button class="check" data-habit-toggle="${esc(h.id)}" aria-label="打卡：${esc(h.title)}" aria-pressed="${!!h.checkins[day]}">${I.check}</button><div class="habit-info todo-main"><strong class="todo-title">${esc(h.title)}</strong><small>连续 ${streak(h, day)} 天 · 累计 ${Object.values(h.checkins).filter(Boolean).length} 天</small><div class="habit-week" aria-label="近七天记录">${days.map(d => `<span class="${h.checkins[d] ? 'checked' : ''}" title="${d} ${h.checkins[d] ? '已打卡' : '未打卡'}" aria-label="${d} ${h.checkins[d] ? '已打卡' : '未打卡'}">${d.slice(8)}${h.checkins[d] ? ' ✓' : ''}</span>`).join('')}</div></div><div class="habit-actions"><button class="${h.reminderTime ? 'time-chip' : 'btn-text'}" data-habit-reminder="${esc(h.id)}">${h.reminderTime ? esc(h.reminderTime) : '设置提醒'}</button><button class="btn-text" data-habit-archive="${esc(h.id)}">停用</button></div></div>`).join('') : '<p class="habit-empty">从一个小目标开始，比如阅读 20 分钟、散步或早睡。</p>'}
       <form id="habit-add-form"><label for="habit-title">添加每日习惯</label><div class="habit-add"><input id="habit-title" maxlength="80" required placeholder="例如：每天阅读 20 分钟" autocomplete="off"><button class="btn btn-primary" type="submit">添加</button></div></form>
       ${habits().some(h => h.archived) ? `<details><summary>已停用的习惯</summary>${habits().filter(h => h.archived).map(h => `<div class="habit-archived"><span>${esc(h.title)}</span><button class="btn-text" data-habit-restore="${esc(h.id)}">恢复</button></div>`).join('')}</details>` : ''}</div>`;
     root.querySelector('.page-head').after(panel);
@@ -3692,9 +3693,10 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=l
     panel.querySelector('input').oninput = e => e.target.setCustomValidity('');
     panel.onclick = e => {
       const button = e.target.closest('button'); if (!button) return;
-      const id = button.dataset.habitToggle || button.dataset.habitArchive || button.dataset.habitRestore;
+      const id = button.dataset.habitReminder || button.dataset.habitToggle || button.dataset.habitArchive || button.dataset.habitRestore;
       const h = habits().find(x => x.id === id); if (!h) return;
-      if (button.dataset.habitToggle) {
+      if (button.dataset.habitReminder) { openHabitReminder(h.id);
+      } else if (button.dataset.habitToggle) {
         const date = today(), completed = !h.checkins[date];
         if (change(() => { h.checkins[date] = completed; })) toast(completed ? '今日打卡完成，继续保持！' : '已撤销今日打卡');
       } else if (button.dataset.habitArchive) {
@@ -3708,10 +3710,90 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=l
   document.head.append(style);
   style.textContent += `.habit-heading{margin:0}.habit-fold{width:100%;text-align:left;margin:0;font-weight:600;font-size:16px;cursor:pointer}.habit-fold:hover{background:var(--bg)}.habit-fold:focus-visible{outline:2px solid var(--accent);outline-offset:-4px;border-radius:var(--radius)}.habit-fold-meta{display:flex;align-items:center;gap:14px;font-size:13px;font-weight:400}.habit-fold-label{color:var(--muted);white-space:nowrap}.habit-body[hidden]{display:none}`;
   let lastDay = today();
+  style.textContent += `
+    .habit-fold>span:first-child{font-family:var(--serif);font-size:17.5px;letter-spacing:.5px}
+    #daily-habits .habit-body{padding:0}.habit-body .habit-row{padding:10px 5px;align-items:flex-start;gap:12px}
+    .habit-info{flex:1}.habit-info strong{font-weight:500}.habit-body .habit-info small{margin:2px 0 6px}
+    .habit-body progress{display:block;height:4px;border:0;overflow:hidden;border-radius:4px;background:var(--divider);accent-color:var(--accent);margin:10px 0}
+    .habit-body progress::-webkit-progress-bar{background:var(--divider)}.habit-body progress::-webkit-progress-value{background:var(--accent)}
+    .habit-week span{padding:1px 4px;min-width:25px;text-align:center}.habit-week .checked{background:var(--accent-weak);color:var(--accent)}
+    .habit-actions{gap:10px}.habit-body .habit-row .check{margin-top:3px}.habit-body .todo-main{cursor:default}
+    #habit-add-form{margin-top:12px}.habit-add input{font-size:14px;padding:7px 10px}.habit-add .btn{font-size:14px;padding:6px 12px}
+    .habit-reminder-form input[type=time]{display:block;width:100%;padding:10px;border:1px solid var(--border);border-radius:9px;margin-top:8px}
+    .habit-reminder-form p{font-size:14px;color:var(--muted);margin:14px 0}.habit-reminder-form .head-actions{flex-wrap:wrap}
+    .habit-alert{position:fixed;right:24px;bottom:28px;z-index:110;max-width:380px;width:calc(100% - 32px)}.habit-alert p{margin:12px 0;overflow-wrap:anywhere}.habit-alert .head-actions{flex-wrap:wrap}
+    @media(max-width:600px){.habit-body .habit-row{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px}.habit-actions{grid-column:2;width:auto;justify-content:flex-start}.habit-fold-meta{gap:7px;font-size:12px}.habit-alert{right:16px;bottom:90px}}
+  `;
   function refreshDay() { const day = today(); if (day !== lastDay) { lastDay = day; if (currentRoute() === 'home') renderHome(); } }
   setInterval(refreshDay, 30000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDay(); });
 })();
+
+// Habit schedules use Beijing dates; browser reminders require a running page.
+function openHabitReminder(id) {
+  const h=DB.habits.find(h=>h.id===id);if(!h)return;
+  $('#modalMask').innerHTML=`<div class="modal"><div class="modal-head"><h3>习惯提醒 · ${esc(h.title)}</h3><button data-act="close-modal">关闭</button></div><form class="modal-body habit-reminder-form"><label class="field">每天提醒时间（北京时间）<input type="time" id="habit-reminder-time" value="${esc(h.reminderTime||'20:00')}" required></label><p>页面保持运行时，到点提醒尚未打卡的习惯。关闭页面或设备休眠后不保证送达；已打卡、停用后不再提醒。</p><button type="button" class="btn btn-ghost" id="habit-system-permission">开启此设备系统通知</button><p id="habit-permission-status" role="status">${window.Notification?.permission==='granted'?'已允许系统通知；也会显示页面内提醒。':'未授权时使用页面内提醒。'}</p><div class="head-actions"><button class="btn btn-primary" type="submit">保存提醒</button><button class="btn btn-ghost" type="button" id="habit-reminder-disable">关闭提醒</button></div></form></div>`;
+  $('#modalMask').classList.add('show');
+    const save=value=>{
+    const current=DB.habits.find(x=>x.id===id);if(!current)return;
+    const previous=current.reminderTime;current.reminderTime=value;
+    if(!persist()){current.reminderTime=previous;return;}
+    closeModal();rerenderCurrent();toast(value?'已设置每天 '+value+' 提醒':'已关闭习惯提醒');
+  };
+  $('.habit-reminder-form').onsubmit=e=>{e.preventDefault();const value=$('#habit-reminder-time').value;if(/^([01]\d|2[0-3]):[0-5]\d$/.test(value))save(value);};
+  $('#habit-reminder-disable').onclick=()=>save(null);
+  $('#habit-system-permission').onclick=async()=>{
+    const result=await requestSystemPermission();
+    if(result==='granted'){DB.settings.systemNotify=true;saveDevicePreferences();await prepareNotificationWorker();}
+    const status=$('#habit-permission-status');if(status)status.textContent=result==='granted'?'已允许系统通知；页面需保持运行。':'未获得通知权限，仍会使用页面内提醒。';
+  };
+}
+let habitReminderBusy=false;
+async function checkHabitReminders(){
+  if(habitReminderBusy||!cloudReady||cloudPending||storageBlocked)return;
+  habitReminderBusy=true;
+  try{
+    const day=businessToday(),now=Date.now(),scope=STORE+'-habit-reminders-'+(loadCloud().session?.uid||'local');
+    const stillCurrent=h=>scope===STORE+'-habit-reminders-'+(loadCloud().session?.uid||'local')&&businessToday()===day&&(DB.habits||[]).some(x=>x.id===h.id&&!x.archived&&!x.checkins[day]&&x.reminderTime===h.reminderTime);
+    let ledger;try{ledger=JSON.parse(safeGet(scope)||'{}');}catch{ledger={};}
+    if(!ledger||typeof ledger!=='object'||Array.isArray(ledger))ledger={};
+    const due=(DB.habits||[]).filter(h=>!h.archived&&!h.checkins[day]&&h.reminderTime&&now>=taskStamp(day+' '+h.reminderTime));
+    const alert=document.querySelector('#habit-reminder-alert');
+    if(alert&&!due.some(h=>h.id===alert.dataset.habit))alert.remove();
+    for(const h of due){
+      const key=h.id+'|'+day+'|'+h.reminderTime;
+      if(ledger[key])continue;
+      const system=DB.settings.systemNotify&&window.Notification?.permission==='granted';
+      if(document.hidden&&!system)continue;
+      let delivered=false;
+      if(system){try{
+        const options={body:h.title,tag:'habit-'+key,data:{habitId:h.id}};
+        const worker=await prepareNotificationWorker();
+        if(!stillCurrent(h))continue;
+        if(worker)await worker.showNotification('知行记 · 习惯提醒',options);
+        else{const n=new Notification('知行记 · 习惯提醒',options);n.onclick=()=>{window.focus();go('home');n.close();};}
+        delivered=true;
+      }catch{}}
+      if(!stillCurrent(h))continue;
+      if(!document.hidden&&!document.querySelector('#habit-reminder-alert')){
+        const panel=document.createElement('aside');panel.id='habit-reminder-alert';panel.dataset.habit=h.id;panel.className='card habit-alert';panel.setAttribute('role','status');
+        panel.innerHTML=`<div class="card-head"><h3>习惯提醒</h3><span class="time-chip">${esc(h.reminderTime)}</span></div><p>${esc(h.title)}</p><div class="head-actions"><button class="btn btn-primary" data-habit-alert-done>完成打卡</button><button class="btn btn-ghost" data-habit-alert-close>知道了</button></div>`;
+        panel.querySelector('[data-habit-alert-close]').onclick=()=>panel.remove();
+        panel.querySelector('[data-habit-alert-done]').onclick=()=>{
+          const current=DB.habits.find(x=>x.id===h.id);if(!current||current.archived){panel.remove();return;}
+          const date=businessToday(),old=current.checkins[date];current.checkins[date]=true;
+          if(!persist()){if(old===undefined)delete current.checkins[date];else current.checkins[date]=old;return;}
+          panel.remove();rerenderCurrent();toast('今日打卡完成');
+        };
+        document.body.append(panel);delivered=true;
+      }
+      if(delivered){ledger[key]=now;for(const k of Object.keys(ledger))if(ledger[k]<now-7*86400000)delete ledger[k];try{localStorage.setItem(scope,JSON.stringify(ledger));}catch{} }
+    }
+  }finally{habitReminderBusy=false;}
+}
+setInterval(checkHabitReminders,15000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkHabitReminders();});
+navigator.serviceWorker?.addEventListener('message',e=>{if(e.data?.type==='open-habit-reminder')go('home');});
 
 // DAILY_HABITS_END
 initReliability();initFeatures();initMobileSync();
