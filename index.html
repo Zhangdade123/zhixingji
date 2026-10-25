@@ -2519,7 +2519,8 @@ function closeModal(){const m=$('#modalMask');m.classList.remove('show');m.inner
    十五、Toast / 音效 / 导出
    ============================================================ */
 function toast(msg){
-  if(cloudNotice && /^(已|保存|备份已恢复)/.test(msg))msg=cloudNotice;
+  // Synchronization runs quietly; explicit account diagnostics remain in settings.
+  if(/云端|云同步|正在同步|开始同步|附件清单随账号数据同步|正在同步附件清单/.test(String(msg)))return;
   const el=document.createElement('div');el.className='toast';el.textContent=msg;
   $('#toastRoot').appendChild(el);
   setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(()=>el.remove(),320);},2100);
@@ -3445,10 +3446,8 @@ function authorityScope(c){return c.enabled&&c.session?.uid?cloudBase(c)+'|'+c.s
 function cloudDataKey(data){const d=cloudClone(data);delete d._rev;return JSON.stringify(d);}
 function authorityMessage(msg){
   cloudNotice=msg;
-  let el=document.getElementById('cloud-authority-state');
-  if(!el){el=document.createElement('div');el.id='cloud-authority-state';el.setAttribute('role','status');el.style.cssText='position:fixed;bottom:82px;left:50%;transform:translateX(-50%);z-index:9999;max-width:90vw;padding:9px 14px;background:#28386c;color:white;border-radius:10px;font-size:13px;pointer-events:none';document.body.appendChild(el);}
-  el.textContent=msg;el.hidden=!msg||(msg==='正在保存到云端，请勿关闭页面…'&&currentRoute()==='notes'&&!!$('#saveState'));
 }
+
 function cacheConfirmedCloud(){
   // Cache confirmed data, including device preferences; never persist an optimistic DB.
   if(!cloudAccepted)return true;
@@ -3712,6 +3711,8 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=l
   let lastDay = today();
   style.textContent += `
     .habit-fold>span:first-child{font-family:var(--serif);font-size:17.5px;letter-spacing:.5px}
+    .habit-fold-meta [aria-live]{font-family:var(--serif);font-weight:600;letter-spacing:.5px}
+    #cloud-authority-state,#saveState,#cloud-state,#ds-row-status{display:none!important}
     #daily-habits .habit-body{padding:0}.habit-body .habit-row{padding:10px 5px;align-items:flex-start;gap:12px}
     .habit-info{flex:1}.habit-info strong{font-weight:500}.habit-body .habit-info small{margin:2px 0 6px}
     .habit-body progress{display:block;height:4px;border:0;overflow:hidden;border-radius:4px;background:var(--divider);accent-color:var(--accent);margin:10px 0}
@@ -3732,7 +3733,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=l
 // Habit schedules use Beijing dates; browser reminders require a running page.
 function openHabitReminder(id) {
   const h=DB.habits.find(h=>h.id===id);if(!h)return;
-  $('#modalMask').innerHTML=`<div class="modal"><div class="modal-head"><h3>习惯提醒 · ${esc(h.title)}</h3><button data-act="close-modal">关闭</button></div><form class="modal-body habit-reminder-form"><label class="field">每天提醒时间（北京时间）<input type="time" id="habit-reminder-time" value="${esc(h.reminderTime||'20:00')}" required></label><p>页面保持运行时，到点提醒尚未打卡的习惯。关闭页面或设备休眠后不保证送达；已打卡、停用后不再提醒。</p><button type="button" class="btn btn-ghost" id="habit-system-permission">开启此设备系统通知</button><p id="habit-permission-status" role="status">${window.Notification?.permission==='granted'?'已允许系统通知；也会显示页面内提醒。':'未授权时使用页面内提醒。'}</p><div class="head-actions"><button class="btn btn-primary" type="submit">保存提醒</button><button class="btn btn-ghost" type="button" id="habit-reminder-disable">关闭提醒</button></div></form></div>`;
+  $('#modalMask').innerHTML=`<div class="modal"><div class="modal-head"><h3>习惯提醒 · ${esc(h.title)}</h3><button data-act="close-modal">关闭</button></div><form class="modal-body habit-reminder-form"><label class="field">每天提醒时间（北京时间）<input type="time" id="habit-reminder-time" value="${esc(h.reminderTime||'20:00')}" required></label><p>页面保持运行时，到点提醒尚未打卡的习惯。关闭页面或设备休眠后不保证送达；已打卡、停用后不再提醒。</p><p>系统通知沿用「我的」中的事项通知设置，无需单独开启。</p><div class="head-actions"><button class="btn btn-primary" type="submit">保存提醒</button><button class="btn btn-ghost" type="button" id="habit-reminder-disable">关闭提醒</button></div></form></div>`;
   $('#modalMask').classList.add('show');
     const save=value=>{
     const current=DB.habits.find(x=>x.id===id);if(!current)return;
@@ -3742,11 +3743,7 @@ function openHabitReminder(id) {
   };
   $('.habit-reminder-form').onsubmit=e=>{e.preventDefault();const value=$('#habit-reminder-time').value;if(/^([01]\d|2[0-3]):[0-5]\d$/.test(value))save(value);};
   $('#habit-reminder-disable').onclick=()=>save(null);
-  $('#habit-system-permission').onclick=async()=>{
-    const result=await requestSystemPermission();
-    if(result==='granted'){DB.settings.systemNotify=true;saveDevicePreferences();await prepareNotificationWorker();}
-    const status=$('#habit-permission-status');if(status)status.textContent=result==='granted'?'已允许系统通知；页面需保持运行。':'未获得通知权限，仍会使用页面内提醒。';
-  };
+
 }
 let habitReminderBusy=false;
 async function checkHabitReminders(){
@@ -3775,7 +3772,7 @@ async function checkHabitReminders(){
         delivered=true;
       }catch{}}
       if(!stillCurrent(h))continue;
-      if(!document.hidden&&!document.querySelector('#habit-reminder-alert')){
+      if(DB.settings.notify&&!document.hidden&&!document.querySelector('#habit-reminder-alert')){
         const panel=document.createElement('aside');panel.id='habit-reminder-alert';panel.dataset.habit=h.id;panel.className='card habit-alert';panel.setAttribute('role','status');
         panel.innerHTML=`<div class="card-head"><h3>习惯提醒</h3><span class="time-chip">${esc(h.reminderTime)}</span></div><p>${esc(h.title)}</p><div class="head-actions"><button class="btn btn-primary" data-habit-alert-done>完成打卡</button><button class="btn btn-ghost" data-habit-alert-close>知道了</button></div>`;
         panel.querySelector('[data-habit-alert-close]').onclick=()=>panel.remove();
