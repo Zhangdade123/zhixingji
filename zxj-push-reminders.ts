@@ -24,19 +24,22 @@ Deno.serve(async(req)=>{
       const c=await config();if(req.headers.get('x-zxj-worker')!==c.worker_secret)return reply({error:'Unauthorized'},401);
       const keys=await vapid();const {data:jobs,error}=await db.rpc('zxj_push_reminders_claim');if(error)throw Error('领取测试任务失败');
       for(const job of jobs||[]){let state='accepted',message='';try{
-        if(job.todo_id){
+        if(job.todo_id||job.habit_id){
           const {data:sub,error:subError}=await db.from('zxj_push_reminders_subscriptions').select('subscription').eq('user_id',job.user_id).eq('device_id',job.device_id).maybeSingle();
           const {data:row,error:rowError}=await db.from('zxj_sync').select('data').eq('user_id',job.user_id).eq('id','main').single();
           if(subError||rowError)throw Error('重新检查事项失败');
-          const task=row?.data?.todos?.find((t:any)=>t.id===job.todo_id);
-          const keys=task?[task.id+'|reminder|'+task.reminder,task.id+'|due|'+task.date+' '+(task.time||'09:00')]:[];
-          if(!sub||!task||task.done||!keys.includes(job.event_key)||Date.now()-Date.parse(job.due_at)>120000){
+          const task=job.habit_id?row?.data?.habits?.find((t:any)=>t.id===job.habit_id):row?.data?.todos?.find((t:any)=>t.id===job.todo_id);
+          const due=Date.parse(job.due_at);
+          const day=Number.isFinite(due)?new Date(due+8*3600000).toISOString().slice(0,10):'';
+          const eventKeys=task?(job.habit_id?['habit|'+task.id+'|'+day+' '+task.reminderTime]:[task.id+'|reminder|'+task.reminder,task.id+'|due|'+task.date+' '+(task.time||'09:00')]):[];
+          const cancelled=job.habit_id?(task?.archived||task?.checkins?.[day]===true||!task?.reminderTime):task?.done;
+          if(!sub||!task||cancelled||!eventKeys.includes(job.event_key)||!Number.isFinite(due)||due>Date.now()||Date.now()-due>120000){
             await db.from('zxj_push_reminders_jobs').update({state:'failed',error:'已取消、改期或超过发送窗口'}).eq('id',job.id);continue;
           }
           job.subscription=sub.subscription;job.title=task.title;
         }
         const sub=validSubscription(job.subscription);
-        await webpush.sendNotification(sub,JSON.stringify({id:job.id,todoId:job.todo_id,title:job.title,eventKey:job.event_key}),{TTL:60,urgency:'high',timeout:8000,vapidDetails:{subject:'https://zhangdade123.github.io/zhixingji/',publicKey:keys.publicKey,privateKey:keys.privateKey}});
+        await webpush.sendNotification(sub,JSON.stringify({id:job.id,todoId:job.todo_id,habitId:job.habit_id,title:job.title,eventKey:job.event_key}),{TTL:60,urgency:'high',timeout:8000,vapidDetails:{subject:'https://zhangdade123.github.io/zhixingji/',publicKey:keys.publicKey,privateKey:keys.privateKey}});
       }catch(e){state=e.statusCode?'failed':'unknown';message=e.statusCode?'推送服务返回 HTTP '+e.statusCode:'网络响应不确定，请检查手机后再测试';}
         const {error:updateError}=await db.from('zxj_push_reminders_jobs').update({state,error:message}).eq('id',job.id).eq('state','sending');if(updateError)throw Error('记录发送结果失败');
       }
@@ -58,7 +61,7 @@ Deno.serve(async(req)=>{
     if(body.action==='status'){
       const {data,error}=await db.from('zxj_push_reminders_jobs').select('id,state,error,due_at').eq('user_id',userId).eq('device_id',body.deviceId).order('created_at',{ascending:false}).limit(1);
       const {data:sub,error:subError}=await db.from('zxj_push_reminders_subscriptions').select('device_id').eq('user_id',userId).eq('device_id',body.deviceId).maybeSingle();
-      if(error||subError)throw Error('读取推送记录失败');return reply({job:data?.[0]||null,enabled:!!sub});
+      if(error||subError)throw Error('读取推送记录失败');return reply({job:data?.[0]||null,enabled:!!sub,habitReminders:(await config()).habit_reminders===true});
     }
     if(body.action==='schedule'){
       const subscription=validSubscription(body.subscription);

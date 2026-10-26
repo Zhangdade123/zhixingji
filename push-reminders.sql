@@ -21,6 +21,8 @@ alter table public.zxj_push_reminders_jobs add column if not exists todo_id text
 alter table public.zxj_push_reminders_jobs add column if not exists event_key text;
 alter table public.zxj_push_reminders_jobs add column if not exists device_id text;
 alter table public.zxj_push_reminders_jobs add column if not exists title text;
+alter table public.zxj_push_reminders_jobs add column if not exists habit_id text;
+alter table public.zxj_push_reminders_config add column if not exists habit_reminders boolean not null default false;
 create unique index if not exists zxj_push_reminders_event on public.zxj_push_reminders_jobs(user_id,device_id,event_key);
 create table if not exists public.zxj_push_reminders_subscriptions (
  user_id uuid not null references auth.users(id) on delete cascade,
@@ -48,7 +50,7 @@ revoke all on function public.zxj_push_reminders_claim() from public,anon,authen
 grant execute on function public.zxj_push_reminders_claim() to service_role;
 create or replace function public.zxj_push_reminders_tick()
 returns void language plpgsql security definer set search_path='' as $$
-declare s record; t jsonb; ev record; v_stamp timestamptz; v_value text;
+declare s record; t jsonb; ev record; v_stamp timestamptz; v_value text; v_day date;
 begin
  if not pg_try_advisory_xact_lock(7729148203) then return; end if;
  for s in select sub.*,sync.data from public.zxj_push_reminders_subscriptions sub
@@ -64,6 +66,22 @@ begin
      if v_stamp>now() or v_stamp<now()-interval '2 minutes' or v_stamp<s.enabled_at then continue;end if;
      insert into public.zxj_push_reminders_jobs(user_id,device_id,subscription,due_at,todo_id,event_key,title)
      values(s.user_id,s.device_id,s.subscription,v_stamp,t->>'id',(t->>'id')||'|'||ev.kind||'|'||ev.value,t->>'title')
+     on conflict(user_id,device_id,event_key) do nothing;
+    end loop;
+   exception when invalid_datetime_format or datetime_field_overflow then continue;
+   end;
+  end loop;
+  for t in select value from jsonb_array_elements(coalesce(s.data->'habits','[]'::jsonb)) loop
+   begin
+    if coalesce(t->>'archived','false')<>'false' or coalesce(t->>'reminderTime','') !~ '^([01]\d|2[0-3]):[0-5]\d$' then continue;end if;
+    -- Include yesterday so 23:59 reminders survive the midnight scan boundary.
+    for v_day in select (now() at time zone 'Asia/Shanghai')::date union all select (now() at time zone 'Asia/Shanghai')::date-1 loop
+     if coalesce(t->'checkins'->>to_char(v_day,'YYYY-MM-DD'),'false')='true' then continue;end if;
+     v_value:=to_char(v_day,'YYYY-MM-DD')||' '||(t->>'reminderTime');
+     v_stamp:=v_value::timestamp at time zone 'Asia/Shanghai';
+     if v_stamp>now() or v_stamp<now()-interval '2 minutes' or v_stamp<s.enabled_at then continue;end if;
+     insert into public.zxj_push_reminders_jobs(user_id,device_id,subscription,due_at,habit_id,event_key,title)
+     values(s.user_id,s.device_id,s.subscription,v_stamp,t->>'id','habit|'||(t->>'id')||'|'||v_value,t->>'title')
      on conflict(user_id,device_id,event_key) do nothing;
     end loop;
    exception when invalid_datetime_format or datetime_field_overflow then continue;
@@ -85,5 +103,6 @@ do $$ begin
  if exists(select 1 from cron.job where jobname='zxj-push-reminders') then perform cron.unschedule('zxj-push-reminders'); end if;
  perform cron.schedule('zxj-push-reminders','* * * * *','select public.zxj_push_reminders_tick();');
 end $$;
+update public.zxj_push_reminders_config set habit_reminders=true where id;
 commit;
 

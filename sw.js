@@ -3,6 +3,12 @@ self.addEventListener('install',()=>self.skipWaiting());
 self.addEventListener('activate',event=>event.waitUntil(self.clients.claim()));
 self.addEventListener('push',event=>{
   let message={};try{message=event.data?.json()||{};}catch{}
+  if(message.habitId){
+    event.waitUntil(self.registration.showNotification('知行记 · 习惯提醒',{
+      body:String(message.title||'每日习惯已到提醒时间'),tag:'habit-'+String(message.eventKey||message.id),
+      icon:new URL('icon-192.png',self.registration.scope).href,data:{habitId:message.habitId}
+    }));return;
+  }
   if(message.todoId){
     event.waitUntil(self.registration.showNotification('知行记 · 事项提醒',{
       body:String(message.title||'事项已到提醒时间'),
