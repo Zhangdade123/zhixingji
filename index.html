@@ -3671,7 +3671,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=l
     panel.innerHTML = `<h3 class="habit-heading"><button type="button" class="card-head habit-fold" aria-expanded="${!collapsed}" aria-controls="habit-content"><span>每日习惯</span><span class="habit-fold-meta"><span aria-live="polite">今日 ${done} / ${active.length} 已完成</span><span class="habit-fold-label">${collapsed ? '展开 ▾' : '收起 ▴'}</span></span></button></h3>
       <div id="habit-content" class="habit-body" ${collapsed ? 'hidden' : ''}><p class="habit-hint">每天坚持一点 · 近七天记录</p>
       <progress aria-label="今日习惯完成进度" max="${active.length || 1}" value="${done}"></progress>
-      ${active.length ? active.map(h => `<div class="habit-row todo-row ${h.checkins[day] ? 'is-done' : ''}"><button class="check" data-habit-toggle="${esc(h.id)}" aria-label="打卡：${esc(h.title)}" aria-pressed="${!!h.checkins[day]}">${I.check}</button><div class="habit-info todo-main"><strong class="todo-title">${esc(h.title)}</strong><small>连续 ${streak(h, day)} 天 · 累计 ${Object.values(h.checkins).filter(Boolean).length} 天</small><div class="habit-week" aria-label="近七天记录">${days.map(d => `<span class="${h.checkins[d] ? 'checked' : ''}" title="${d} ${h.checkins[d] ? '已打卡' : '未打卡'}" aria-label="${d} ${h.checkins[d] ? '已打卡' : '未打卡'}">${d.slice(8)}${h.checkins[d] ? ' ✓' : ''}</span>`).join('')}</div></div><div class="habit-actions"><button class="${h.reminderTime ? 'time-chip' : 'btn-text'}" data-habit-reminder="${esc(h.id)}">${h.reminderTime ? esc(h.reminderTime) : '设置提醒'}</button><button class="btn-text" data-habit-archive="${esc(h.id)}">停用</button><button class="btn-text" data-habit-delete="${esc(h.id)}">删除</button></div></div>`).join('') : '<p class="habit-empty">从一个小目标开始，比如阅读 20 分钟、散步或早睡。</p>'}
+      ${active.length ? active.map(h => `<div class="habit-row todo-row ${h.checkins[day] ? 'is-done' : ''}"><button class="check" data-habit-toggle="${esc(h.id)}" aria-label="打卡：${esc(h.title)}" aria-pressed="${!!h.checkins[day]}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg></button><div class="habit-info todo-main"><strong class="todo-title">${esc(h.title)}</strong><small>连续 ${streak(h, day)} 天 · 累计 ${Object.values(h.checkins).filter(Boolean).length} 天</small><div class="habit-week" aria-label="近七天记录">${days.map(d => `<span class="${h.checkins[d] ? 'checked' : ''}" title="${d} ${h.checkins[d] ? '已打卡' : '未打卡'}" aria-label="${d} ${h.checkins[d] ? '已打卡' : '未打卡'}">${d.slice(8)}${h.checkins[d] ? ' ✓' : ''}</span>`).join('')}</div></div><div class="habit-actions"><button class="${h.reminderTime ? 'time-chip' : 'btn-text'}" data-habit-reminder="${esc(h.id)}">${h.reminderTime ? esc(h.reminderTime) : '设置提醒'}</button><button class="btn-text" data-habit-archive="${esc(h.id)}">停用</button><button class="btn-text" data-habit-delete="${esc(h.id)}">删除</button></div></div>`).join('') : '<p class="habit-empty">从一个小目标开始，比如阅读 20 分钟、散步或早睡。</p>'}
       <form id="habit-add-form"><label for="habit-title">添加每日习惯</label><div class="habit-add"><input id="habit-title" maxlength="80" required placeholder="例如：每天阅读 20 分钟" autocomplete="off"><button class="btn btn-primary" type="submit">添加</button></div></form>
       ${habits().some(h => h.archived) ? `<details><summary>已停用的习惯</summary>${habits().filter(h => h.archived).map(h => `<div class="habit-archived"><span>${esc(h.title)}</span><button class="btn-text" data-habit-restore="${esc(h.id)}">恢复</button><button class="btn-text" data-habit-delete="${esc(h.id)}">删除</button></div>`).join('')}</details>` : ''}</div>`;
     root.querySelector('.page-head').after(panel);
@@ -3723,7 +3723,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=l
     .habit-body progress{display:block;height:4px;border:0;overflow:hidden;border-radius:4px;background:var(--divider);accent-color:var(--accent);margin:10px 0}
     .habit-body progress::-webkit-progress-bar{background:var(--divider)}.habit-body progress::-webkit-progress-value{background:var(--accent)}
     .habit-week span{padding:1px 4px;min-width:25px;text-align:center}.habit-week .checked{background:var(--accent-weak);color:var(--accent)}
-    .habit-actions{gap:10px}.habit-body .habit-row .check{margin-top:3px}.habit-body .todo-main{cursor:default}
+    .habit-actions{gap:10px}.habit-body .habit-row .check{margin-top:3px}.habit-body .habit-row .check svg{width:16px;height:16px}.habit-body .todo-main{cursor:default}
     #habit-add-form{margin-top:12px}.habit-add input{font-size:14px;padding:7px 10px}.habit-add .btn{font-size:14px;padding:6px 12px}
     .habit-reminder-form input[type=time]{display:block;width:100%;padding:10px;border:1px solid var(--border);border-radius:9px;margin-top:8px}
     .habit-reminder-form p{font-size:14px;color:var(--muted);margin:14px 0}.habit-reminder-form .head-actions{flex-wrap:wrap}
@@ -3745,17 +3745,24 @@ async function refreshHabitPushState(force=false){
   try{
     const result=await reminderPushAPI('status');
     if(scope!==habitPushScope())return {enabled:false,supported:false};
-    habitPushState={scope,checkedAt:Date.now(),enabled:result.enabled===true,supported:result.habitReminders===true,error:''};
+    habitPushState={scope,checkedAt:Date.now(),enabled:result.enabled===true,supported:result.habitReminders===true,error:'',job:result.job||null};
   }catch(e){habitPushState={scope,checkedAt:Date.now(),enabled:false,supported:false,error:e.message};}
   return habitPushState;
 }
 async function showHabitReminderStatus(){
   const target=$('#habit-reminder-status');if(!target)return;
+  if(!habitPushScope()){target.textContent='请先登录网页版账号，再检查此设备的后台提醒。本地版不连接该后台。';return;}
   target.textContent='正在检查…';const state=await refreshHabitPushState(true);
   if(!target.isConnected)return;
-  const permission=window.Notification?.permission||'不支持';
-  target.textContent=(state.supported?(state.enabled?'此设备已接入习惯后台推送，与待办共用订阅。':'后台已支持习惯提醒；此设备尚未开启「后台事项提醒」。'):'习惯后台推送尚未接通，目前仅页面保持运行时可提醒。')+
-    ' 页面弹卡：'+(DB.settings.notify?'开':'关')+'；系统通知：'+(DB.settings.systemNotify?'开':'关')+'；系统权限：'+permission+'。'+(state.error?'状态检查失败：'+state.error:'');
+  const permission=({granted:'已允许',denied:'已拒绝',default:'尚未授权'})[window.Notification?.permission]||'当前环境不支持';
+  let localSubscription='无法读取';
+  try{const registration=await navigator.serviceWorker?.getRegistration(new URL('./',location.href).href);const sub=await registration?.pushManager?.getSubscription();localSubscription=sub?'存在':'不存在';}catch{}
+  if(!target.isConnected)return;
+  target.textContent=(state.error?'后台状态检查失败，暂不能判断是否接通：'+state.error+'。':state.supported?(state.enabled?'服务器已登记此设备的习惯后台推送，与待办共用订阅。':'后台已支持习惯提醒；此设备尚未开启「后台事项提醒」。'):'服务器尚未确认习惯推送支持，请检查函数与 SQL 是否均已升级。')+
+    ' 页面弹卡：'+(DB.settings.notify?'开':'关')+'；前台系统通知：'+(DB.settings.systemNotify?'开':'关')+'；系统权限：'+permission+'；本机推送订阅：'+localSubscription+'。'+
+    (state.enabled&&localSubscription==='不存在'?'订阅状态不一致，请在此设备重新开启「后台事项提醒」。':'')+
+    (state.job?'最近一次后台通知：'+(({accepted:'推送服务已接受（不代表手机已显示）',pending:'等待发送',sending:'发送中',failed:'发送失败',unknown:'结果未知'})[state.job.state]||state.job.state)+(state.job.error?'，'+state.job.error:'')+'。':'')+
+    ' 请在手机实际使用的应用中检查；电脑结果不能代表手机。';
 }
 function openHabitReminder(id) {
   const h=DB.habits.find(h=>h.id===id);if(!h)return;
