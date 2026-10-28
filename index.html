@@ -824,6 +824,10 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 .attachment-paste:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
 @media(max-width:760px){.review-status-head{margin:-16px -16px 12px;padding:14px 16px;border-radius:14px 0 8px 0;}}
 
+.note-organize{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;font-size:13px;color:var(--muted)}
+.note-organize label{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%}
+.note-organize select{max-width:200px;min-width:0}.note-organize button{font-size:13px}
+.tag-editor label{max-width:100%;display:flex;align-items:center;gap:6px}.tag-editor label select{max-width:180px}
 </style>
 <link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icon-192.png"><meta name="theme-color" content="#28386c"><meta name="apple-mobile-web-app-capable" content="yes">
 </head>
@@ -1325,6 +1329,8 @@ function migrate(d){
   if(!d.categories||!d.categories.length)d.categories=defaultCategories();
   if(!Array.isArray(d.todos))d.todos=[];
   if(!Array.isArray(d.notes))d.notes=[];
+  if(!Array.isArray(d.noteFolders))d.noteFolders=[];
+  d.noteFolders=d.noteFolders.filter(f=>f&&typeof f.id==='string'&&typeof f.name==='string');
   if(!d.trash||typeof d.trash!=='object')d.trash={todos:[],notes:[]};
   if(!Array.isArray(d.trash.todos))d.trash.todos=[];
   if(!Array.isArray(d.trash.notes))d.trash.notes=[];
@@ -1437,7 +1443,7 @@ function repeatLabel(r){return {none:'',daily:'每天',weekly:'每周',monthly:'
 /* ============================================================
    五、UI 状态与 hash 路由
    ============================================================ */
-const ui={todoTab:'today',todoCat:'all',todoQuery:'',todoSort:'time',groupOpen:{},groupPage:{},noteCat:'all',noteQuery:'',editingNote:null,calMonth:T.slice(0,7),calSelected:T,reviewRange:'week',quickFiles:[],quickText:'',ntFiles:[],sumRange:'week',sumStart:'',sumEnd:'',sumPromptKind:'summary',sumDraft:'',sumDraftKind:null,sumBusy:false};
+const ui={todoTab:'today',todoCat:'all',todoQuery:'',todoSort:'time',groupOpen:{},groupPage:{},noteCat:'all',noteFolder:'all',noteQuery:'',editingNote:null,calMonth:T.slice(0,7),calSelected:T,reviewRange:'week',quickFiles:[],quickText:'',ntFiles:[],sumRange:'week',sumStart:'',sumEnd:'',sumPromptKind:'summary',sumDraft:'',sumDraftKind:null,sumBusy:false};
 const ROUTES=['home','todos','notes','calendar','review','summary','me','trash'];
 function currentRoute(){const h=(location.hash||'#/home').slice(2).split('?')[0];return ROUTES.includes(h)?h:'home';}
 function go(r){flushEditor();location.hash='#/'+r;}
@@ -1772,14 +1778,42 @@ function renderTodos(){
 /* ============================================================
    九、视图：笔记（列表 + 编辑）
    ============================================================ */
+function noteFolderId(n){return (DB.noteFolders||[]).some(f=>f.id===n.folderId)?n.folderId:'';}
+function noteFolderOptions(selected,all=false){
+  return (all?'<option value="all">全部文件夹</option>':'')+`<option value="" ${selected===''?'selected':''}>未分类</option>`+(DB.noteFolders||[]).map(f=>`<option value="${esc(f.id)}" ${selected===f.id?'selected':''}>${esc(f.name)}</option>`).join('');
+}
+function manageNoteFolder(action){
+  flushEditor();
+  const folders=DB.noteFolders||[],folder=folders.find(f=>f.id===ui.noteFolder);
+  if(action!=='new'&&!folder)return;
+  if(action==='delete'){
+    if(!confirm('删除文件夹“'+folder.name+'”？其中的笔记将移回未分类，不会删除。'))return;
+    DB.noteFolders=folders.filter(f=>f.id!==folder.id);
+    [...DB.notes,...(DB.trash.notes||[]).map(t=>t.item)].forEach(n=>{if(n&&n.folderId===folder.id)n.folderId='';});
+    ui.noteFolder='';
+  }else{
+    const value=prompt(action==='new'?'新建文件夹名称':'重命名文件夹',folder?folder.name:'');
+    if(value===null)return;
+    const name=value.trim();
+    if(!name||name.length>60){toast('文件夹名称请输入 1–60 个字符');return;}
+    if(folders.some(f=>f!==folder&&f.name.toLocaleLowerCase()===name.toLocaleLowerCase())){toast('已有同名文件夹');return;}
+    if(action==='new'){const f={id:uid(),name,createdAt:Date.now()};DB.noteFolders=[...folders,f];ui.noteFolder=f.id;}
+    else folder.name=name;
+  }
+  const saved=persist();ui.groupPage={};renderNotes();if(saved)toast('文件夹已更新');
+}
 function noteSummary(n){return stripHtml(n.content).slice(0,40);}
 function renderNotes(){
   flushEditor();
   const q=ui.noteQuery.trim().toLowerCase();
+  if(ui.noteFolder!=='all'&&ui.noteFolder&&!DB.noteFolders.some(f=>f.id===ui.noteFolder))ui.noteFolder='';
+  const sort=['name','updatedAt','createdAt'].includes(DB.settings.noteSort)?DB.settings.noteSort:'updatedAt';
+  const direction=DB.settings.noteSortDirection==='asc'?1:-1;
   let list=DB.notes.slice().sort((a,b)=>{
-    if(a.pinned!==b.pinned)return a.pinned?-1:1;
-    return b.updatedAt-a.updatedAt;
+    const value=sort==='name'?(a.title||'未命名笔记').localeCompare(b.title||'未命名笔记','zh-CN',{numeric:true,sensitivity:'base'}):(Number(a[sort])||0)-(Number(b[sort])||0);
+    return direction*value||String(a.id).localeCompare(String(b.id));
   });
+  if(ui.noteFolder!=='all')list=list.filter(n=>noteFolderId(n)===ui.noteFolder);
   if(ui.noteCat!=='all')list=list.filter(n=>n.cat===ui.noteCat);
   if(q)list=list.filter(n=>(n.title||'').toLowerCase().includes(q)||stripHtml(n.content).toLowerCase().includes(q)
     ||n.tags.some(t=>t.toLowerCase().includes(q))||n.attachments&&n.attachments.some(a=>a.name.toLowerCase().includes(q)));
@@ -1802,8 +1836,17 @@ function renderNotes(){
     <div class="note-list-pane">
       <div class="search-box">${I.search}<input id="note-search" data-act="note-search" value="${esc(ui.noteQuery)}" placeholder="搜索标题、正文、标签、文件名"></div>
       <button class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:10px" data-act="new-note">${I.plus}新建笔记</button>
+      <div class="note-organize">
+        <label>文件夹<select class="cat-select-mini" data-act="note-folder-filter" aria-label="筛选文件夹">${noteFolderOptions(ui.noteFolder,true)}</select></label>
+        <button class="btn-text" data-act="note-folder-new">新建文件夹</button>
+        ${DB.noteFolders.some(f=>f.id===ui.noteFolder)?'<button class="btn-text" data-act="note-folder-rename">重命名</button><button class="btn-text" data-act="note-folder-delete">删除文件夹</button>':''}
+      </div>
+      <div class="note-organize">
+        <label>排序<select class="cat-select-mini" data-act="note-sort" aria-label="笔记排序">${[['name','名称'],['updatedAt','编辑时间'],['createdAt','创建时间']].map(([key,label])=>`<option value="${key}" ${sort===key?'selected':''}>${label}</option>`).join('')}</select></label>
+        <select class="cat-select-mini" data-act="note-sort-direction" aria-label="排序方向"><option value="asc" ${direction===1?'selected':''}>${sort==='name'?'名称升序':'最早优先'}</option><option value="desc" ${direction===-1?'selected':''}>${sort==='name'?'名称降序':'最新优先'}</option></select>
+      </div>
       ${catFilter(ui.noteCat,'note-cat')}
-      ${list.length?group(pinned,'置顶','note-pinned')+group(recent,'最近','note-recent'):emptyBlock('没有匹配的笔记','换个类型或关键词，或新建一条')}
+      ${list.length?group(pinned,'置顶','note-pinned')+group(recent,'笔记','note-recent'):emptyBlock('没有匹配的笔记','换个文件夹、类型或关键词，或新建一条')}
     </div>
     <div class="note-edit-pane" id="noteEditPane">
       ${cur?editorHtml(cur):`
@@ -1835,6 +1878,7 @@ function editorHtml(n){
     </div>
     <div class="editor-body" id="ed-body" contenteditable="true" data-ph="开始书写正文……"></div>
     <div class="tag-editor" id="tagEditor">
+      <label style="font-size:14px;color:var(--muted)">文件夹 <select class="cat-select-mini" data-act="note-folder-move" data-id="${esc(n.id)}" aria-label="移动笔记到文件夹">${noteFolderOptions(noteFolderId(n))}</select></label>
       <span style="font-size:14px;color:var(--muted)">类型</span>
       <select class="cat-select-mini" data-act="note-cat-change" data-id="${n.id}">${catOptions(n.cat)}</select>
       <span style="width:1px;height:18px;background:var(--border);margin:0 4px"></span>
@@ -2694,6 +2738,9 @@ document.addEventListener('click',e=>{
       document.querySelectorAll(`.pri-seg button[data-prefix="${d.prefix}"]`).forEach(b=>b.classList.toggle('active',b===el));
       break;}
     case 'todo-cat': ui.todoCat=d.cat;ui.groupPage={};renderTodos();break;
+    case 'note-folder-new': manageNoteFolder('new');break;
+    case 'note-folder-rename': manageNoteFolder('rename');break;
+    case 'note-folder-delete': manageNoteFolder('delete');break;
     case 'note-cat': ui.noteCat=d.cat;ui.groupPage={};renderNotes();break;
     case 'qn-del-file': ui.quickFiles.splice(Number(d.i),1);renderHome();break;
     case 'nt-del-file': ui.ntFiles.splice(Number(d.i),1);renderNtFiles();break;
@@ -2738,6 +2785,17 @@ document.addEventListener('change',e=>{
   if(d.act==='ai-setting'){if(!DB.settings.ai)DB.settings.ai={};DB.settings.ai[d.k]=el.value;persist();if(d.k==='key')toast(el.value?'已保存 API Key':'已清空 API Key');}
   if(d.act==='default-page'){DB.settings.defaultPage=el.value;persist();toast('已设为默认打开页面');}
   if(d.act==='cat-rename'){catRename(d.id,el.value);}
+  if(d.act==='note-folder-filter'){ui.noteFolder=el.value;ui.groupPage={};renderNotes();}
+  if(d.act==='note-sort'||d.act==='note-sort-direction'){
+    flushEditor();
+    if(d.act==='note-sort'){DB.settings.noteSort=el.value;DB.settings.noteSortDirection=el.value==='name'?'asc':'desc';}
+    else DB.settings.noteSortDirection=el.value;
+    persist();ui.groupPage={};renderNotes();
+  }
+  if(d.act==='note-folder-move'){
+    flushEditor();const n=noteById(d.id);
+    if(n&&(el.value===''||DB.noteFolders.some(f=>f.id===el.value))){n.folderId=el.value;n.updatedAt=Date.now();const saved=persist();renderNotes();if(saved)toast('笔记已移动');}
+  }
   if(d.act==='note-cat-change'){
     if(window._flushEditor)window._flushEditor();
     const n=noteById(d.id);if(n){n.cat=el.value;n.updatedAt=Date.now();persist();renderNotes();toast('已切换类型');}
@@ -2919,7 +2977,7 @@ function todoToNote(id){
 }
 function createNote(){
   if(window._flushEditor)window._flushEditor();
-  const n={id:uid(),cat:(ui.noteCat!=='all'?ui.noteCat:DB.categories[0].id),pinned:false,title:'',tags:[],content:'',attachments:[],createdAt:Date.now(),updatedAt:Date.now()};
+  const n={id:uid(),folderId:DB.noteFolders.some(f=>f.id===ui.noteFolder)?ui.noteFolder:'',cat:(ui.noteCat!=='all'?ui.noteCat:DB.categories[0].id),pinned:false,title:'',tags:[],content:'',attachments:[],createdAt:Date.now(),updatedAt:Date.now()};
   DB.notes.push(n);ui.editingNote=n.id;persist();
   if(currentRoute()!=='notes')go('notes');else renderNotes();
   setTimeout(()=>{const t=$('#ed-title');if(t)t.focus();},30);
