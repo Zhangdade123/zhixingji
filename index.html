@@ -1804,6 +1804,9 @@ function manageNoteFolder(action){
 }
 function noteSummary(n){return stripHtml(n.content).slice(0,40);}
 function renderNotes(){
+  const previousList=document.querySelector('#view-notes .note-list-pane');
+  const previousScroll=previousList?.scrollTop||0;
+
   flushEditor();
   const q=ui.noteQuery.trim().toLowerCase();
   if(ui.noteFolder!=='all'&&ui.noteFolder&&!DB.noteFolders.some(f=>f.id===ui.noteFolder))ui.noteFolder='';
@@ -1854,6 +1857,9 @@ function renderNotes(){
     </div>
   </div>`;
   if(cur)bindEditor(cur);
+  const nextList=document.querySelector('#view-notes .note-list-pane');
+  if(nextList)nextList.scrollTop=previousScroll;
+
 }
 function editorHtml(n){
   return `
