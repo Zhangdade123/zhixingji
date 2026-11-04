@@ -3727,7 +3727,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=l
   function renderHabits() {
     const root = document.querySelector('#view-home');
     root.querySelector('#daily-habits')?.remove();
-    const day = today(), active = habits().filter(h => !h.archived);
+    const day = today(), active = habits().filter(h => !h.archived).sort((a, b) => (a.reminderTime || '').localeCompare(b.reminderTime || ''));
     const done = active.filter(h => h.checkins[day]).length;
     const days = Array.from({length:7}, (_, i) => addDays(day, i - 6));
     const panel = document.createElement('section');
