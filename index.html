@@ -1120,6 +1120,9 @@ function validateData(d){
       if(r.range&&(!Array.isArray(r.range)||r.range.length!==2||r.range.some(x=>typeof x!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(x))))throw Error('总结范围格式错误');
       if(key==='habits'&&(typeof r.title!=='string'||!r.title.trim()||!r.checkins||typeof r.checkins!=='object'||Array.isArray(r.checkins)||Object.entries(r.checkins).some(([day,value])=>!/^\d{4}-\d{2}-\d{2}$/.test(day)||typeof value!=='boolean')))throw Error('打卡记录格式错误');
       if(key==='habits'&&r.reminderTime!=null&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(r.reminderTime))throw Error('习惯提醒时间格式错误');
+      if(key==='habits'&&r.reminderWeek!=null){
+        if(typeof r.reminderWeek!=='object'||Array.isArray(r.reminderWeek)||Object.entries(r.reminderWeek).some(([day,time])=>!(/^[1-7]$/.test(day))||typeof time!=='string'||!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(time)))throw Error('习惯每周提醒格式错误');
+      }
       if(key==='notes'&&r.content)r.content=sanitizeHtml(r.content);
     }
   }
@@ -3727,7 +3730,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=l
   function renderHabits() {
     const root = document.querySelector('#view-home');
     root.querySelector('#daily-habits')?.remove();
-    const day = today(), active = habits().filter(h => !h.archived).sort((a, b) => (a.reminderTime || '').localeCompare(b.reminderTime || ''));
+    const day = today(), active = habits().filter(h => !h.archived).sort((a, b) => habitReminderTime(a,day).localeCompare(habitReminderTime(b,day)));
     const done = active.filter(h => h.checkins[day]).length;
     const days = Array.from({length:7}, (_, i) => addDays(day, i - 6));
     const panel = document.createElement('section');
@@ -3735,7 +3738,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=l
     panel.innerHTML = `<h3 class="habit-heading"><button type="button" class="card-head habit-fold" aria-expanded="${!collapsed}" aria-controls="habit-content"><span>每日习惯</span><span class="habit-fold-meta"><span aria-live="polite">今日 ${done} / ${active.length} 已完成</span><span class="habit-fold-label">${collapsed ? '展开 ▾' : '收起 ▴'}</span></span></button></h3>
       <div id="habit-content" class="habit-body" ${collapsed ? 'hidden' : ''}><p class="habit-hint">每天坚持一点 · 近七天记录</p>
       <progress aria-label="今日习惯完成进度" max="${active.length || 1}" value="${done}"></progress>
-      ${active.length ? active.map(h => `<div class="habit-row todo-row ${h.checkins[day] ? 'is-done' : ''}"><button class="check" data-habit-toggle="${esc(h.id)}" aria-label="打卡：${esc(h.title)}" aria-pressed="${!!h.checkins[day]}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg></button><div class="habit-info todo-main"><strong class="todo-title">${esc(h.title)}</strong><small>连续 ${streak(h, day)} 天 · 累计 ${Object.values(h.checkins).filter(Boolean).length} 天</small><div class="habit-week" aria-label="近七天记录">${days.map(d => `<span class="${h.checkins[d] ? 'checked' : ''}" title="${d} ${h.checkins[d] ? '已打卡' : '未打卡'}" aria-label="${d} ${h.checkins[d] ? '已打卡' : '未打卡'}">${d.slice(8)}${h.checkins[d] ? ' ✓' : ''}</span>`).join('')}</div></div><div class="habit-actions"><button class="${h.reminderTime ? 'time-chip' : 'btn-text'}" data-habit-reminder="${esc(h.id)}">${h.reminderTime ? esc(h.reminderTime) : '设置提醒'}</button><button class="btn-text" data-habit-archive="${esc(h.id)}">停用</button><button class="btn-text" data-habit-delete="${esc(h.id)}">删除</button></div></div>`).join('') : '<p class="habit-empty">从一个小目标开始，比如阅读 20 分钟、散步或早睡。</p>'}
+      ${active.length ? active.map(h => `<div class="habit-row todo-row ${h.checkins[day] ? 'is-done' : ''}"><button class="check" data-habit-toggle="${esc(h.id)}" aria-label="打卡：${esc(h.title)}" aria-pressed="${!!h.checkins[day]}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg></button><div class="habit-info todo-main"><strong class="todo-title">${esc(h.title)}</strong><small>连续 ${streak(h, day)} 天 · 累计 ${Object.values(h.checkins).filter(Boolean).length} 天</small><div class="habit-week" aria-label="近七天记录">${days.map(d => `<span class="${h.checkins[d] ? 'checked' : ''}" title="${d} ${h.checkins[d] ? '已打卡' : '未打卡'}" aria-label="${d} ${h.checkins[d] ? '已打卡' : '未打卡'}">${d.slice(8)}${h.checkins[d] ? ' ✓' : ''}</span>`).join('')}</div></div><div class="habit-actions"><button class="${h.reminderTime || h.reminderWeek ? 'time-chip' : 'btn-text'}" data-habit-reminder="${esc(h.id)}">${esc(habitReminderLabel(h,day))}</button><button class="btn-text" data-habit-archive="${esc(h.id)}">停用</button><button class="btn-text" data-habit-delete="${esc(h.id)}">删除</button></div></div>`).join('') : '<p class="habit-empty">从一个小目标开始，比如阅读 20 分钟、散步或早睡。</p>'}
       <form id="habit-add-form"><label for="habit-title">添加每日习惯</label><div class="habit-add"><input id="habit-title" maxlength="80" required placeholder="例如：每天阅读 20 分钟" autocomplete="off"><button class="btn btn-primary" type="submit">添加</button></div></form>
       ${habits().some(h => h.archived) ? `<details><summary>已停用的习惯</summary>${habits().filter(h => h.archived).map(h => `<div class="habit-archived"><span>${esc(h.title)}</span><button class="btn-text" data-habit-restore="${esc(h.id)}">恢复</button><button class="btn-text" data-habit-delete="${esc(h.id)}">删除</button></div>`).join('')}</details>` : ''}</div>`;
     root.querySelector('.page-head').after(panel);
@@ -3799,6 +3802,20 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){const c=l
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDay(); });
 })();
 
+function habitReminderTime(h,day){
+  if(!h)return '';
+  let value=h.reminderTime;
+  if(h.reminderWeek!=null){
+    if(typeof h.reminderWeek!=='object'||Array.isArray(h.reminderWeek))return '';
+    const weekday=new Date(day+'T00:00:00Z').getUTCDay()||7;
+    value=h.reminderWeek[String(weekday)];
+  }
+  return typeof value==='string'&&/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(value)?value:'';
+}
+function habitReminderLabel(h,day){
+  if(h.reminderWeek!=null){const time=habitReminderTime(h,day);return time?'今日 '+time:'今日不提醒';}
+  return h.reminderTime||'设置提醒';
+}
 // Server push is used only after the deployed worker confirms habit support.
 let habitPushState={scope:'',checkedAt:0,enabled:false,supported:false,error:''};
 function habitPushScope(){const c=loadCloud();return c.session?.uid?cloudBase(c)+'|'+c.session.uid+'|'+c.device:'';}
@@ -3830,18 +3847,42 @@ async function showHabitReminderStatus(){
 }
 function openHabitReminder(id) {
   const h=DB.habits.find(h=>h.id===id);if(!h)return;
-  $('#modalMask').innerHTML=`<div class="modal"><div class="modal-head"><h3>习惯提醒 · ${esc(h.title)}</h3><button data-act="close-modal">关闭</button></div><form class="modal-body habit-reminder-form"><label class="field">每天提醒时间（北京时间）<input type="time" id="habit-reminder-time" value="${esc(h.reminderTime||'20:00')}" required></label><p>页面保持运行时，到点提醒尚未打卡的习惯；后台接通后，手机可共用待办推送。已打卡、停用或删除后不再提醒。</p><p>系统通知沿用「我的」中的事项通知设置，无需单独开启。</p><button class="btn btn-ghost" type="button" id="habit-check-status">检查提醒状态</button><p id="habit-reminder-status" role="status"></p><div class="head-actions"><button class="btn btn-primary" type="submit">保存提醒</button><button class="btn btn-ghost" type="button" id="habit-reminder-disable">关闭提醒</button></div></form></div>`;
+  const weekly=h.reminderWeek!=null,labels=['周一','周二','周三','周四','周五','周六','周日'];
+  const week=weekly?h.reminderWeek:Object.fromEntries(labels.map((_,i)=>[i+1,h.reminderTime||'20:00']));
+  $('#modalMask').innerHTML=`<div class="modal"><div class="modal-head"><h3>习惯提醒 · ${esc(h.title)}</h3><button data-act="close-modal">关闭</button></div><form class="modal-body habit-reminder-form">
+    <label class="field">重复方式<select id="habit-reminder-mode"><option value="daily" ${!weekly?'selected':''}>每天</option><option value="weekly" ${weekly?'selected':''}>每周自定义</option></select></label>
+    <label class="field" id="habit-daily-field">每天提醒时间（北京时间）<input type="time" id="habit-reminder-time" value="${esc(h.reminderTime||'20:00')}"></label>
+    <fieldset id="habit-week-fields" style="border:0;padding:0;margin:0"><legend>选择提醒日期与时间（北京时间）</legend>
+      <div class="head-actions" style="margin:10px 0"><button type="button" class="btn-text" data-habit-days="workdays">工作日</button><button type="button" class="btn-text" data-habit-days="weekend">周末</button><button type="button" class="btn-text" data-habit-days="all">全选</button></div>
+      ${labels.map((label,i)=>`<div class="habit-week-time-row" style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin:8px 0"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" data-habit-week-day="${i+1}" ${week[i+1]?'checked':''} style="width:18px;height:18px">${label}</label><input type="time" data-habit-week-time="${i+1}" value="${esc(week[i+1]||h.reminderTime||'20:00')}" aria-label="${label}提醒时间" style="width:145px;min-width:0"></div>`).join('')}
+    </fieldset>
+    <p>页面保持运行时，按选定日期和时间提醒尚未打卡的习惯；后台接通后，手机可共用待办推送。未选中的日期不提醒，已打卡、停用或删除后不再提醒。</p><p>系统通知沿用「我的」中的事项通知设置，无需单独开启。</p><button class="btn btn-ghost" type="button" id="habit-check-status">检查提醒状态</button><p id="habit-reminder-status" role="status"></p><div class="head-actions"><button class="btn btn-primary" type="submit">保存提醒</button><button class="btn btn-ghost" type="button" id="habit-reminder-disable">关闭提醒</button></div></form></div>`;
   $('#modalMask').classList.add('show');
-    const save=value=>{
-    const current=DB.habits.find(x=>x.id===id);if(!current)return;
-    const previous=current.reminderTime;current.reminderTime=value;
-    if(!persist()){current.reminderTime=previous;return;}
-    closeModal();rerenderCurrent();toast(value?'已设置每天 '+value+' 提醒':'已关闭习惯提醒');checkHabitReminders();
+  const form=$('.habit-reminder-form');
+  const updateFields=()=>{
+    const weekly=$('#habit-reminder-mode').value==='weekly';
+    $('#habit-daily-field').hidden=weekly;$('#habit-reminder-time').disabled=weekly;$('#habit-reminder-time').required=!weekly;
+    $('#habit-week-fields').hidden=!weekly;$('#habit-week-fields').disabled=!weekly;
+    form.querySelectorAll('[data-habit-week-day]').forEach(box=>{const input=form.querySelector('[data-habit-week-time="'+box.dataset.habitWeekDay+'"]');input.disabled=!weekly||!box.checked;input.required=weekly&&box.checked;});
   };
-  $('.habit-reminder-form').onsubmit=e=>{e.preventDefault();const value=$('#habit-reminder-time').value;if(/^([01]\d|2[0-3]):[0-5]\d$/.test(value))save(value);};
-  $('#habit-reminder-disable').onclick=()=>save(null);
+  form.onchange=updateFields;updateFields();
+  form.querySelectorAll('[data-habit-days]').forEach(button=>button.onclick=()=>{form.querySelectorAll('[data-habit-week-day]').forEach(box=>{const day=Number(box.dataset.habitWeekDay);box.checked=button.dataset.habitDays==='all'||(button.dataset.habitDays==='workdays'?day<=5:day>=6);});updateFields();});
+  const save=(time,week)=>{
+    const current=DB.habits.find(x=>x.id===id);if(!current)return;
+    const previous={time:current.reminderTime,week:current.reminderWeek};current.reminderTime=time;current.reminderWeek=week;
+    if(!persist()){current.reminderTime=previous.time;current.reminderWeek=previous.week;return;}
+    closeModal();rerenderCurrent();toast(week?'已保存每周提醒':time?'已设置每天 '+time+' 提醒':'已关闭习惯提醒');checkHabitReminders();
+  };
+  form.onsubmit=e=>{
+    e.preventDefault();
+    if($('#habit-reminder-mode').value==='weekly'){
+      const schedule={};form.querySelectorAll('[data-habit-week-day]:checked').forEach(box=>{schedule[box.dataset.habitWeekDay]=form.querySelector('[data-habit-week-time="'+box.dataset.habitWeekDay+'"]').value;});
+      if(!Object.keys(schedule).length){toast('请至少选择一天，或点击关闭提醒');return;}
+      if(Object.values(schedule).every(v=>/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(v)))save(null,schedule);
+    }else{const value=$('#habit-reminder-time').value;if(/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(value))save(value,null);}
+  };
+  $('#habit-reminder-disable').onclick=()=>save(null,null);
   $('#habit-check-status').onclick=showHabitReminderStatus;
-
 }
 let habitReminderBusy=false;
 async function checkHabitReminders(){
@@ -3851,10 +3892,10 @@ async function checkHabitReminders(){
     const backend=await refreshHabitPushState();
     if(!cloudReady||cloudPending||storageBlocked)return;
     const day=businessToday(),now=Date.now(),scope=STORE+'-habit-reminders-'+(loadCloud().session?.uid||'local');
-    const stillCurrent=h=>scope===STORE+'-habit-reminders-'+(loadCloud().session?.uid||'local')&&businessToday()===day&&(DB.habits||[]).some(x=>x.id===h.id&&!x.archived&&!x.checkins[day]&&x.reminderTime===h.reminderTime);
+    const stillCurrent=h=>scope===STORE+'-habit-reminders-'+(loadCloud().session?.uid||'local')&&businessToday()===day&&(DB.habits||[]).some(x=>x.id===h.id&&!x.archived&&!x.checkins[day]&&habitReminderTime(x,day)===h.reminderTime);
     let ledger;try{ledger=JSON.parse(safeGet(scope)||'{}');}catch{ledger={};}
     if(!ledger||typeof ledger!=='object'||Array.isArray(ledger))ledger={};
-    const due=(DB.habits||[]).filter(h=>!h.archived&&!h.checkins[day]&&h.reminderTime&&now>=taskStamp(day+' '+h.reminderTime));
+    const due=(DB.habits||[]).map(h=>({...h,reminderTime:habitReminderTime(h,day)})).filter(h=>!h.archived&&!h.checkins[day]&&h.reminderTime&&now>=taskStamp(day+' '+h.reminderTime));
     const alert=document.querySelector('#habit-reminder-alert');
     if(alert&&(!DB.settings.notify||!due.some(h=>h.id===alert.dataset.habit)))alert.remove();
     for(const h of due){

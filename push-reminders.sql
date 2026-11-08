@@ -48,6 +48,15 @@ begin
 end $$;
 revoke all on function public.zxj_push_reminders_claim() from public,anon,authenticated;
 grant execute on function public.zxj_push_reminders_claim() to service_role;
+create or replace function public.zxj_habit_reminder_time(h jsonb,day date)
+returns text language sql immutable set search_path='' as $$
+ select case when value ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$' then value else null end
+ from (select case when h->'reminderWeek' is not null and h->'reminderWeek'<>'null'::jsonb
+  then case when jsonb_typeof(h->'reminderWeek')='object' then h->'reminderWeek'->>extract(isodow from day)::int::text else null end
+  else h->>'reminderTime' end as value) v;
+$$;
+revoke all on function public.zxj_habit_reminder_time(jsonb,date) from public,anon,authenticated;
+grant execute on function public.zxj_habit_reminder_time(jsonb,date) to service_role;
 create or replace function public.zxj_push_reminders_tick()
 returns void language plpgsql security definer set search_path='' as $$
 declare s record; t jsonb; ev record; v_stamp timestamptz; v_value text; v_day date;
@@ -73,11 +82,13 @@ begin
   end loop;
   for t in select value from jsonb_array_elements(coalesce(s.data->'habits','[]'::jsonb)) loop
    begin
-    if coalesce(t->>'archived','false')<>'false' or coalesce(t->>'reminderTime','') !~ '^([01]\d|2[0-3]):[0-5]\d$' then continue;end if;
+    if coalesce(t->>'archived','false')<>'false' then continue;end if;
     -- Include yesterday so 23:59 reminders survive the midnight scan boundary.
     for v_day in select (now() at time zone 'Asia/Shanghai')::date union all select (now() at time zone 'Asia/Shanghai')::date-1 loop
      if coalesce(t->'checkins'->>to_char(v_day,'YYYY-MM-DD'),'false')='true' then continue;end if;
-     v_value:=to_char(v_day,'YYYY-MM-DD')||' '||(t->>'reminderTime');
+     v_value:=public.zxj_habit_reminder_time(t,v_day);
+     if v_value is null then continue;end if;
+     v_value:=to_char(v_day,'YYYY-MM-DD')||' '||v_value;
      v_stamp:=v_value::timestamp at time zone 'Asia/Shanghai';
      if v_stamp>now() or v_stamp<now()-interval '2 minutes' or v_stamp<s.enabled_at then continue;end if;
      insert into public.zxj_push_reminders_jobs(user_id,device_id,subscription,due_at,habit_id,event_key,title)
@@ -105,4 +116,3 @@ do $$ begin
 end $$;
 update public.zxj_push_reminders_config set habit_reminders=true where id;
 commit;
-

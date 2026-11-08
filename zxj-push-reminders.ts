@@ -15,6 +15,17 @@ function validSubscription(s:any){
 }
 async function config(){const {data,error}=await db.from('zxj_push_reminders_config').select('*').eq('id',true).single();if(error||!data)throw Error('请先执行 push-reminders.sql');return data;}
 async function vapid(){let c=await config();if(!c.vapid){const keys=webpush.generateVAPIDKeys();const {error}=await db.from('zxj_push_reminders_config').update({vapid:keys}).eq('id',true).is('vapid',null);if(error)throw Error('保存推送密钥失败');c=await config();}return c.vapid;}
+function habitReminderTime(h:any,day:string){
+  if(!h)return '';
+  let value=h.reminderTime;
+  if(h.reminderWeek!=null){
+    if(typeof h.reminderWeek!=='object'||Array.isArray(h.reminderWeek))return '';
+    const weekday=new Date(day+'T00:00:00Z').getUTCDay()||7;
+    value=h.reminderWeek[String(weekday)];
+  }
+  return typeof value==='string'&&/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(value)?value:'';
+}
+
 Deno.serve(async(req)=>{
   if(req.method==='OPTIONS')return new Response(null,{headers:cors});
   if(req.method!=='POST')return reply({error:'Method not allowed'},405);
@@ -31,8 +42,9 @@ Deno.serve(async(req)=>{
           const task=job.habit_id?row?.data?.habits?.find((t:any)=>t.id===job.habit_id):row?.data?.todos?.find((t:any)=>t.id===job.todo_id);
           const due=Date.parse(job.due_at);
           const day=Number.isFinite(due)?new Date(due+8*3600000).toISOString().slice(0,10):'';
-          const eventKeys=task?(job.habit_id?['habit|'+task.id+'|'+day+' '+task.reminderTime]:[task.id+'|reminder|'+task.reminder,task.id+'|due|'+task.date+' '+(task.time||'09:00')]):[];
-          const cancelled=job.habit_id?(task?.archived||task?.checkins?.[day]===true||!task?.reminderTime):task?.done;
+          const habitTime=job.habit_id?habitReminderTime(task,day):'';
+          const eventKeys=task?(job.habit_id?['habit|'+task.id+'|'+day+' '+habitTime]:[task.id+'|reminder|'+task.reminder,task.id+'|due|'+task.date+' '+(task.time||'09:00')]):[];
+          const cancelled=job.habit_id?(task?.archived||task?.checkins?.[day]===true||!habitTime):task?.done;
           if(!sub||!task||cancelled||!eventKeys.includes(job.event_key)||!Number.isFinite(due)||due>Date.now()||Date.now()-due>120000){
             await db.from('zxj_push_reminders_jobs').update({state:'failed',error:'已取消、改期或超过发送窗口'}).eq('id',job.id);continue;
           }
@@ -71,4 +83,3 @@ Deno.serve(async(req)=>{
     return reply({error:'不支持的操作'},400);
   }catch(e){return reply({error:e.message||'推送实验服务异常'},500);}
 });
-
