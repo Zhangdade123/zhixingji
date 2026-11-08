@@ -19,7 +19,11 @@
   function renderHabits() {
     const root = document.querySelector('#view-home');
     root.querySelector('#daily-habits')?.remove();
-    const day = today(), active = habits().filter(h => !h.archived).sort((a, b) => habitReminderTime(a,day).localeCompare(habitReminderTime(b,day)));
+    const day = today(), active = habits().filter(h => !h.archived).sort((a, b) => {
+      const aTime=habitReminderTime(a,day),bTime=habitReminderTime(b,day);
+      const aOffDay=a.reminderWeek!=null&&!aTime,bOffDay=b.reminderWeek!=null&&!bTime;
+      return Number(aOffDay)-Number(bOffDay)||aTime.localeCompare(bTime);
+    });
     const done = active.filter(h => h.checkins[day]).length;
     const days = Array.from({length:7}, (_, i) => addDays(day, i - 6));
     const panel = document.createElement('section');
