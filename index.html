@@ -321,17 +321,18 @@ details.mini-menu summary svg{width:16px;height:16px;}
 .tb-label{font-size:13.5px;color:var(--muted);margin-left:auto;display:flex;align-items:center;gap:6px;}
 .editor-body{
   position:relative;min-height:340px;padding:6px 0;outline:none;
-  color:var(--body);font-size:16px;line-height:1.8;text-align:left;overflow-wrap:anywhere;
+  font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+  color:#374151;font-size:16px;font-weight:400;line-height:1.8;text-align:left;overflow-wrap:anywhere;
 }
 .editor-body:empty::before,.editor-body:has(>p[data-note-empty]:only-child)::before{
   content:attr(data-ph);position:absolute;inset:6px auto auto 0;color:#B6BECB;pointer-events:none;
 }
 .editor-body :is(p,div){margin:0 0 10px}
 .editor-body :is(p,div):is(:last-child,[data-note-empty],:has(+ [data-note-empty])){margin-bottom:0}
-.editor-body :is(h1,h2,h3){font-family:var(--serif)}
-.editor-body h1{font-size:28px;line-height:1.35;margin:24px 0 12px}
-.editor-body h2{font-size:23px;line-height:1.4;margin:20px 0 10px}
-.editor-body h3{font-size:19px;line-height:1.45;margin:16px 0 8px}
+.editor-body :is(h1,h2,h3){font-family:inherit;text-indent:0}
+.editor-body h1{font-size:26px;font-weight:700;line-height:1.4;color:#1f2937;margin:24px 0 12px}
+.editor-body h2{font-size:22px;font-weight:700;line-height:1.45;color:#253653;margin:20px 0 10px}
+.editor-body h3{font-size:19px;font-weight:600;line-height:1.5;color:#34445c;margin:16px 0 8px}
 .editor-body>:first-child{margin-top:0}
 .editor-body :is(ul,ol){margin:0 0 10px;padding-inline-start:1.6em}
 .editor-body ul{list-style:disc}
@@ -887,9 +888,15 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 }
 
 /* 笔记格式工具栏 */
-.note-document .note-format-toolbar{--format-size:36px;gap:5px 7px}
-.note-format-group{display:flex;align-items:center;gap:2px}
-.note-format-group+.note-format-group{border-inline-start:1px solid var(--border);padding-inline-start:5px}
+.note-document .note-format-toolbar{--format-size:30px;flex-wrap:nowrap;align-items:flex-start;gap:5px;padding:5px 0;min-width:0}
+.note-format-strip{
+  display:flex;align-items:center;flex:1;min-width:0;gap:4px;
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;padding:3px;
+}
+.note-format-group{display:flex;flex:none;align-items:center;gap:1px}
+.note-format-group+.note-format-group{border-inline-start:1px solid var(--border);padding-inline-start:3px}
+.note-format-toolbar .editor-more{flex:none;margin-top:3px}
+.note-format-toolbar .tb-btn[data-cmd="p"]{width:36px;white-space:nowrap;font-size:13px}
 .note-format-toolbar .tb-btn,.note-format-toolbar .mini-menu summary{
   min-height:var(--format-size);height:var(--format-size);border-radius:7px;
 }
@@ -904,8 +911,7 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 .editor-body .note-task-checkbox{position:absolute;inset-inline-start:-1.35em;top:.52em;width:15px;height:15px;margin:0;cursor:pointer;accent-color:var(--accent)}
 .editor-body li[data-note-task="done"]{color:var(--muted)}
 @media(max-width:860px){
-  .note-document .note-format-toolbar{--format-size:34px;gap:3px 5px}
-  .note-format-group+.note-format-group{padding-inline-start:3px}
+  .note-document .note-format-toolbar{--format-size:34px}
 }
 
 </style>
@@ -2025,12 +2031,14 @@ function noteEditorToolbar(){
   const paste=typeof pasteAttachmentButton==='function'
     ? `<button type="button" class="tb-btn" data-act="paste-attachment" data-target="ed-file-input" title="粘贴附件（也可按 Ctrl/⌘+V）" aria-label="粘贴附件">${clipboard}</button>`:'';
   return `<div class="editor-toolbar note-format-toolbar" role="toolbar" aria-label="笔记文字格式">
+    <div class="note-format-strip">
     ${group('段落样式',command('p','正文','正文',true)+command('h1','一级标题','H1',true)+command('h2','二级标题','H2',true)+command('h3','三级标题','H3',true))}
-    ${group('文字格式',command('bold','加粗',I.bold,true)+command('italic','斜体','<em>I</em>',true)+command('underline','下划线','<u>U</u>',true)+command('strikeThrough','删除线','<s>S</s>',true)+command('clear','清除格式',erase))}
-    ${group('列表与引用',command('insertUnorderedList','无序列表',I.ul,true)+command('insertOrderedList','有序列表',I.ol,true)+command('checklist','待办列表',checklist,true)+command('quote','引用',I.quote,true))}
+    ${group('文字格式',command('bold','加粗',I.bold,true)+command('underline','下划线','<u>U</u>',true)+command('strikeThrough','删除线','<s>S</s>',true)+command('clear','清除格式',erase))}
+    ${group('列表',command('insertUnorderedList','无序列表',I.ul,true)+command('insertOrderedList','有序列表',I.ol,true)+command('checklist','待办列表',checklist,true))}
     ${group('缩进',command('outdent','减少缩进',outdent)+command('indent','增加缩进',indent))}
     ${group('插入',`<button type="button" class="tb-btn" data-act="ed-image" title="插入图片" aria-label="插入图片">${I.img}</button><button type="button" class="tb-btn" data-act="ed-file" title="添加附件" aria-label="添加附件">${I.file}</button>${paste}`)}
     ${group('撤销与重做',command('undo','撤销',undo)+command('redo','重做',redo))}
+    </div>
     <details class="mini-menu editor-more">
       <summary aria-label="更多格式" title="更多格式">更多 <span aria-hidden="true">⌄</span></summary>
       <div class="mini-pop"><button type="button" data-act="ed-cmd" data-cmd="insertHorizontalRule">插入分割线</button></div>
@@ -2212,8 +2220,7 @@ function updateNoteToolbar(body,toolbar){
     p:paragraph==='p',h1:paragraph==='h1',h2:paragraph==='h2',h3:paragraph==='h3',
     checklist:task,
     insertUnorderedList:!task&&item?.parentElement?.localName==='ul',
-    insertOrderedList:!task&&item?.parentElement?.localName==='ol',
-    quote:!!node?.closest('blockquote:not([data-note-indent]):not([style*="40px"])')
+    insertOrderedList:!task&&item?.parentElement?.localName==='ol'
   };
   toolbar.querySelectorAll('[aria-pressed]').forEach(button=>{
     const cmd=button.dataset.cmd;
@@ -2310,7 +2317,33 @@ function execEdit(cmd){
   const execute=(name,value=null)=>document.execCommand(name,false,value);
   if(['p','h1','h2','h3'].includes(cmd))execute('formatBlock',cmd);
   else if(cmd==='quote')execute('formatBlock','blockquote');
-  else if(cmd==='clear')execute('removeFormat');
+  else if(cmd==='clear'){
+    execute('removeFormat');
+    const range=noteSelection(body);
+    if(range){
+      const containingHeading=noteElement(range.commonAncestorContainer)?.closest('h1,h2,h3');
+      if(containingHeading&&body.contains(containingHeading)){
+        execute('formatBlock','p');
+      }else if(!range.collapsed){
+        // Format each touched heading on its own so a selection can safely span lists or quotes.
+        const headings=[...body.querySelectorAll('h1,h2,h3')].filter(heading=>range.intersectsNode(heading));
+        if(headings.length){
+          const selection=getSelection(),original=range.cloneRange();
+          for(const heading of headings){
+            const caret=document.createRange();
+            caret.setStart(heading,0);
+            selection.removeAllRanges();
+            selection.addRange(caret);
+            execute('formatBlock','p');
+          }
+          if(body.contains(original.commonAncestorContainer)){
+            selection.removeAllRanges();
+            selection.addRange(original);
+          }
+        }
+      }
+    }
+  }
   else if(cmd==='checklist'){
     const range=noteSelection(body);
     const start=noteElement(range?.startContainer)?.closest('li');
