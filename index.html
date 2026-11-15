@@ -828,6 +828,59 @@ input[type=datetime-local]::-webkit-datetime-edit-ampm-field:focus{background:no
 .note-organize label{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%}
 .note-organize select{max-width:200px;min-width:0}.note-organize button{font-size:13px}
 .tag-editor label{max-width:100%;display:flex;align-items:center;gap:6px}.tag-editor label select{max-width:180px}
+
+/* 笔记列表与编辑布局 */
+.notes-wrap{position:relative}
+.note-list-pane,.note-edit-pane{min-width:0}
+#note-search{min-width:0;width:100%}
+.note-item{position:relative;padding:0;margin-bottom:1px}
+.note-open{display:block;width:100%;padding:7px 9px;text-align:left;min-width:0}
+.note-item .ni-title{font-weight:650;padding-right:66px}
+.ni-title-text,.ni-category{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.note-item .ni-sub{display:block;margin-top:1px;font-size:12.5px}
+.note-item .ni-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:1px;color:var(--muted);font-size:11.5px}
+.ni-foot time{flex:none}
+.note-row-actions{position:absolute;top:3px;right:5px;display:flex;gap:1px}
+.note-row-actions button{display:grid;place-items:center;width:30px;height:30px;border-radius:6px;color:var(--muted)}
+.note-row-actions button:hover,.note-row-actions button:focus-visible{background:var(--card);color:var(--accent)}
+.note-row-actions svg{width:15px;height:15px}
+@media(hover:hover) and (pointer:fine){
+  .note-row-actions{opacity:0;pointer-events:none}
+  .note-item:hover .note-row-actions,.note-item:focus-within .note-row-actions{opacity:1;pointer-events:auto}
+}
+.note-pinned summary{cursor:pointer}
+.note-pinned summary::marker{color:var(--accent)}
+.note-divider{display:none}
+.note-edit-pane .note-document{width:100%;max-width:860px;margin-inline:auto}
+.note-document .title-input{min-width:0;width:100%}
+.note-document .editor-meta{margin:0 0 12px;padding:0;border-top:0;gap:6px 12px;font-size:13px;color:var(--muted)}
+.editor-meta label,.editor-tags{display:flex;align-items:center;gap:6px;min-width:0;max-width:100%}
+.editor-meta select{max-width:180px;min-width:0}
+.editor-tags{flex-wrap:wrap}
+.editor-tags .tag-chip2{font-size:12.5px}
+.editor-meta input{width:105px;max-width:100%}
+.note-document .editor-body{overflow-wrap:anywhere}
+.note-document .editor-toolbar{overflow:visible;flex-wrap:wrap}
+.note-document .editor-toolbar .mini-menu summary{width:auto;padding:0 8px;font-size:13px}
+.note-document .editor-toolbar .mini-pop{left:0;right:auto;min-width:120px}
+.note-mobile-back{display:none}
+@media(min-width:861px){
+  .notes-wrap:not(.note-fullscreen){--note-list-track:min(var(--note-list-width, 360px), 46%);grid-template-columns:minmax(0,var(--note-list-track)) minmax(0,1fr)}
+  .notes-wrap:not(.note-fullscreen) .note-divider{display:block;position:absolute;z-index:6;top:0;bottom:0;left:var(--note-list-track);width:12px;transform:translateX(-50%);cursor:col-resize;touch-action:none}
+  .note-divider:hover,.note-divider:focus-visible,.note-divider.dragging{background:var(--accent-weak)}
+}
+@media(max-width:860px){
+  .view.notes-view.active{overflow:visible}
+  .notes-wrap:not(.note-fullscreen) .note-edit-pane{overflow:visible}
+  .notes-wrap:not(.note-fullscreen) .editor-toolbar{top:calc(50px + max(10px, env(safe-area-inset-top)))}
+  .notes-wrap:not(.note-fullscreen) .editor-top{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px}
+  .notes-wrap:not(.note-fullscreen) .note-mobile-back{display:inline-flex;justify-self:start}
+  .notes-wrap:not(.note-fullscreen) .editor-actions{width:auto;grid-row:1;grid-column:2}
+  .notes-wrap:not(.note-fullscreen) .title-input{grid-row:2;grid-column:1/-1;font-size:26px}
+  .note-row-actions button{width:36px;height:36px}
+  .note-item .ni-title{padding-right:76px}
+}
+
 </style>
 <link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icon-192.png"><meta name="theme-color" content="#28386c"><meta name="apple-mobile-web-app-capable" content="yes">
 </head>
@@ -1805,7 +1858,49 @@ function manageNoteFolder(action){
   }
   const saved=persist();ui.groupPage={};renderNotes();if(saved)toast('文件夹已更新');
 }
-function noteSummary(n){return stripHtml(n.content).slice(0,40);}
+const noteListWidthKey=STORE+'-note-list-width';
+let noteListWidth=Number(safeGet(noteListWidthKey))||360;
+let notePinnedOpen=true;
+function bindNoteDivider(){
+  const wrap=$('#notesWrap'), pane=$('#noteListPane'), divider=$('.note-divider');
+  const min=260;
+  const max=()=>Math.max(min,Math.min(520,Math.floor(wrap.clientWidth*.46)));
+  const updateRange=()=>{
+    divider.setAttribute('aria-valuenow',String(Math.round(pane.getBoundingClientRect().width)));
+    divider.setAttribute('aria-valuemax',String(max()));
+  };
+  const setWidth=width=>{
+    noteListWidth=Math.min(max(),Math.max(min,Math.round(width)));
+    wrap.style.setProperty('--note-list-width',noteListWidth+'px');
+    updateRange();
+  };
+  const persistWidth=()=>{try{localStorage.setItem(noteListWidthKey,String(noteListWidth));}catch{}};
+  wrap.style.setProperty('--note-list-width',noteListWidth+'px');
+  divider.onfocus=updateRange;
+  if(divider.offsetWidth)updateRange();
+  let dragOffset=0;
+  divider.onpointerdown=e=>{
+    if(e.button!==0)return;
+    dragOffset=e.clientX-pane.getBoundingClientRect().right;
+    divider.setPointerCapture(e.pointerId);
+    divider.classList.add('dragging');
+  };
+  divider.onpointermove=e=>{
+    if(divider.hasPointerCapture(e.pointerId))setWidth(e.clientX-wrap.getBoundingClientRect().left-dragOffset);
+  };
+  divider.onlostpointercapture=()=>{divider.classList.remove('dragging');persistWidth();};
+  divider.onkeydown=e=>{
+    const width=pane.getBoundingClientRect().width;
+    const next={ArrowLeft:width-16,ArrowRight:width+16,Home:min,End:max()}[e.key];
+    if(next===undefined)return;
+    e.preventDefault();
+    setWidth(next);
+    persistWidth();
+  };
+  const pinned=$('.note-pinned');
+  if(pinned&&!ui.noteQuery.trim())pinned.ontoggle=()=>{notePinnedOpen=pinned.open;};
+}
+function noteSummary(n){return stripHtml(n.content).replace(/\s+/g,' ').trim().slice(0,100);}
 function renderNotes(){
   const previousList=document.querySelector('#view-notes .note-list-pane');
   const previousScroll=previousList?.scrollTop||0;
@@ -1830,17 +1925,32 @@ function renderNotes(){
     const pages=Math.max(1,Math.ceil(arr.length/PAGE_SIZE));
     let p=ui.groupPage[key]||0;if(p>=pages)p=pages-1;if(p<0)p=0;
     const slice=arr.slice(p*PAGE_SIZE,(p+1)*PAGE_SIZE);
-    return `<div class="note-group-label">${label}${arr.length>PAGE_SIZE?` <span class="ng-count">${arr.length}</span>`:''}</div>`+slice.map(n=>`
-    <div class="note-item ${cur&&cur.id===n.id?'active':''}" data-act="open-note" data-id="${n.id}">
-      <div class="ni-title">${n.pinned?I.pin:''}${esc(n.title||'未命名笔记')}</div>
-      <div class="ni-sub">${esc(noteSummary(n)||'暂无正文')}</div>
-      <div class="ni-foot"><span class="cat-name">${catDot(n.cat)}${esc(catName(n.cat))}</span>${n.tags.map(t=>'#'+esc(t)).join(' ')} · ${fmtTime(n.updatedAt)}</div>
-    </div>`).join('')+pager(key,arr.length);
+    const rows=slice.map(n=>{
+      const selected=cur?.id===n.id;
+      const title=esc(n.title||'未命名笔记');
+      const pinLabel=n.pinned?'取消置顶':'置顶';
+      return `
+      <div class="note-item ${selected?'active':''}" data-act="open-note" data-id="${esc(n.id)}">
+        <button type="button" class="note-open" ${selected?'aria-current="true"':''}>
+          <span class="ni-title">${n.pinned?I.pin:''}<span class="ni-title-text">${title}</span></span>
+          <span class="ni-sub">${esc(noteSummary(n)||'暂无正文')}</span>
+          <span class="ni-foot"><span class="ni-category cat-name">${catDot(n.cat)}${esc(catName(n.cat))}</span><time title="最后修改时间">${fmtTime(n.updatedAt)}</time></span>
+        </button>
+        <span class="note-row-actions">
+          <button type="button" data-act="toggle-pin" data-id="${esc(n.id)}" title="${pinLabel}" aria-label="${pinLabel}：${title}">${I.pin}</button>
+          <button type="button" data-act="remove-note" data-id="${esc(n.id)}" title="移至回收站" aria-label="移至回收站：${title}">${I.trash}</button>
+        </span>
+      </div>`;
+    }).join('')+pager(key,arr.length);
+    if(key==='note-pinned'){
+      return `<details class="note-pinned" ${notePinnedOpen||q?'open':''}><summary class="note-group-label">置顶 <span class="ng-count">${arr.length}</span></summary>${rows}</details>`;
+    }
+    return `<div class="note-group-label">${label} <span class="ng-count">${arr.length}</span></div>`+rows;
   };
   $('#view-notes').innerHTML=`
   <div class="notes-wrap ${cur?'editing':''} ${cur&&ui.noteFullscreen?'note-fullscreen':''}" id="notesWrap">
-    <div class="note-list-pane">
-      <div class="search-box">${I.search}<input id="note-search" data-act="note-search" value="${esc(ui.noteQuery)}" placeholder="搜索标题、正文、标签、文件名"></div>
+    <div class="note-list-pane" id="noteListPane">
+      <div class="search-box">${I.search}<input id="note-search" data-act="note-search" aria-label="搜索笔记" aria-keyshortcuts="Control+K Meta+K" title="搜索笔记（Ctrl/⌘+K）" value="${esc(ui.noteQuery)}" placeholder="搜索标题、正文、标签、文件名"></div>
       <button class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:10px" data-act="new-note">${I.plus}新建笔记</button>
       <div class="note-organize">
         <label>文件夹<select class="cat-select-mini" data-act="note-folder-filter" aria-label="筛选文件夹">${noteFolderOptions(ui.noteFolder,true)}</select></label>
@@ -1854,12 +1964,14 @@ function renderNotes(){
       ${catFilter(ui.noteCat,'note-cat')}
       ${list.length?group(pinned,'置顶','note-pinned')+group(recent,'笔记','note-recent'):emptyBlock('没有匹配的笔记','换个文件夹、类型或关键词，或新建一条')}
     </div>
+    <div class="note-divider" role="separator" tabindex="0" aria-orientation="vertical" aria-label="调整笔记列表宽度" aria-controls="noteListPane" aria-valuemin="260"></div>
     <div class="note-edit-pane" id="noteEditPane">
-      ${cur?editorHtml(cur):`
+      ${cur?`<div class="note-document">${editorHtml(cur)}</div>`:`
         <div class="editor-empty"><div><div class="ee">记录想法、知识与阶段性认识</div><div>选择左侧笔记查看，或新建一条开始记录</div></div></div>`}
     </div>
   </div>`;
   if(cur)bindEditor(cur);
+  bindNoteDivider();
   const nextList=document.querySelector('#view-notes .note-list-pane');
   if(nextList)nextList.scrollTop=previousScroll;
 
@@ -1867,33 +1979,34 @@ function renderNotes(){
 function editorHtml(n){
   return `
     <div class="editor-top">
+      <button type="button" class="btn btn-ghost note-mobile-back" data-act="back-list">${I.chevL}笔记列表</button>
       <input class="title-input" id="ed-title" data-id="${n.id}" value="${esc(n.title)}" placeholder="请输入标题">
       <div class="editor-actions"><div class="save-state" id="saveState" role="status">已保存</div><button class="btn btn-ghost" data-act="note-fullscreen" aria-pressed="${!!ui.noteFullscreen}" title="${ui.noteFullscreen?'退出全屏（Esc）':'全屏编辑'}">${ui.noteFullscreen?'退出全屏':'全屏编辑'}</button></div>
+    </div>
+    <div class="tag-editor editor-meta" id="tagEditor">
+      <label>文件夹 <select class="cat-select-mini" data-act="note-folder-move" data-id="${esc(n.id)}" aria-label="移动笔记到文件夹">${noteFolderOptions(noteFolderId(n))}</select></label>
+      <label>类型 <select class="cat-select-mini" data-act="note-cat-change" data-id="${n.id}">${catOptions(n.cat)}</select></label>
+      <div class="editor-tags"><label for="tag-input">标签</label>
+      ${n.tags.map(t=>`<span class="tag-chip2">#${esc(t)}<button data-act="del-tag" data-tag="${esc(t)}">${I.x}</button></span>`).join('')}
+      <input id="tag-input" placeholder="回车添加"></div>
     </div>
     <div class="editor-toolbar" role="toolbar" aria-label="笔记文字格式">
       <button class="tb-btn" title="加粗" data-act="ed-cmd" data-cmd="bold">${I.bold}</button>
       <button class="tb-btn tb-text" title="正文段落" data-act="ed-cmd" data-cmd="p">正文</button><button class="tb-btn" title="一级标题" data-act="ed-cmd" data-cmd="h1">H1</button>
       <button class="tb-btn" title="二级标题" data-act="ed-cmd" data-cmd="h2">H2</button>
-      <button class="tb-btn" title="三级标题" data-act="ed-cmd" data-cmd="h3">H3</button><button class="tb-btn" title="斜体" aria-label="斜体" data-act="ed-cmd" data-cmd="italic"><em>I</em></button><button class="tb-btn" title="删除线" aria-label="删除线" data-act="ed-cmd" data-cmd="strikeThrough"><s>S</s></button><span class="tb-sep"></span>
+      <button class="tb-btn" title="三级标题" data-act="ed-cmd" data-cmd="h3">H3</button><button class="tb-btn" title="斜体" aria-label="斜体" data-act="ed-cmd" data-cmd="italic"><em>I</em></button><span class="tb-sep"></span>
       <button class="tb-btn" title="无序列表" data-act="ed-cmd" data-cmd="insertUnorderedList">${I.ul}</button>
       <button class="tb-btn" title="有序列表" data-act="ed-cmd" data-cmd="insertOrderedList">${I.ol}</button>
       <button class="tb-btn" title="引用" data-act="ed-cmd" data-cmd="quote">${I.quote}</button>
       <span class="tb-sep"></span>
-      <button class="tb-btn tb-text" title="列表增加缩进（Tab）" data-act="ed-cmd" data-cmd="indent">缩进</button><button class="tb-btn tb-text" title="列表减少缩进（Shift+Tab）" data-act="ed-cmd" data-cmd="outdent">减少缩进</button><button class="tb-btn tb-text" title="撤销（Ctrl/Cmd+Z）" data-act="ed-cmd" data-cmd="undo">撤销</button><button class="tb-btn tb-text" title="重做" data-act="ed-cmd" data-cmd="redo">重做</button><button class="tb-btn tb-text" title="清除选中文字样式并恢复正文段落" data-act="ed-cmd" data-cmd="clear">清除格式</button><span class="tb-sep"></span><button class="tb-btn" title="插入图片" data-act="ed-image">${I.img}</button>
+      <button class="tb-btn tb-text" title="撤销（Ctrl/Cmd+Z）" data-act="ed-cmd" data-cmd="undo">撤销</button><button class="tb-btn tb-text" title="重做" data-act="ed-cmd" data-cmd="redo">重做</button><span class="tb-sep"></span><button class="tb-btn" title="插入图片" data-act="ed-image">${I.img}</button>
       <button class="tb-btn" title="添加文件" data-act="ed-file">${I.file}</button>
+      <details class="mini-menu editor-more"><summary aria-label="更多格式">更多</summary><div class="mini-pop"><button type="button" data-act="ed-cmd" data-cmd="strikeThrough">删除线</button><button type="button" data-act="ed-cmd" data-cmd="indent">增加缩进</button><button type="button" data-act="ed-cmd" data-cmd="outdent">减少缩进</button><button type="button" data-act="ed-cmd" data-cmd="clear">清除格式</button></div></details>
       <input type="file" id="ed-image-input" accept="image/*" hidden multiple>
       <input type="file" id="ed-file-input" hidden multiple>${pasteAttachmentButton('ed-file-input')}
       <span class="tb-label"><button class="btn-text" data-act="toggle-pin" data-id="${n.id}" style="font-size:14px">${n.pinned?'取消置顶':'置顶'}</button></span>
     </div>
     <div class="editor-body" id="ed-body" contenteditable="true" data-ph="开始书写正文……"></div>
-    <div class="tag-editor" id="tagEditor">
-      <label style="font-size:14px;color:var(--muted)">文件夹 <select class="cat-select-mini" data-act="note-folder-move" data-id="${esc(n.id)}" aria-label="移动笔记到文件夹">${noteFolderOptions(noteFolderId(n))}</select></label>
-      <span style="font-size:14px;color:var(--muted)">类型</span>
-      <select class="cat-select-mini" data-act="note-cat-change" data-id="${n.id}">${catOptions(n.cat)}</select>
-      <span style="width:1px;height:18px;background:var(--border);margin:0 4px"></span>
-      ${n.tags.map(t=>`<span class="tag-chip2">#${esc(t)}<button data-act="del-tag" data-tag="${esc(t)}">${I.x}</button></span>`).join('')}
-      <input id="tag-input" placeholder="输入标签后回车，如 #科研">
-    </div>
     <div class="attach-strip" id="attachStrip">
       ${(n.attachments||[]).map(a=>`<span class="attach-file">${I.file}${attachmentLink(a)}<span class="sz">${fmtSize(a.size)}</span><button data-act="note-del-file" data-file="${esc(a.id||a.name)}" aria-label="移除附件">${I.x}</button></span>`).join('')}
     </div>
@@ -1948,6 +2061,9 @@ function bindEditor(n){
   toolbar.addEventListener('mousedown',e=>{if(e.target.closest('[data-act="ed-cmd"]')){rememberSelection();e.preventDefault();}});
   body.addEventListener('focus',()=>document.execCommand('defaultParagraphSeparator',false,'p'));
   body.addEventListener('input',onChange);title.addEventListener('input',onChange);
+  title.addEventListener('keydown',e=>{
+    if(e.key==='Enter'&&!e.isComposing){e.preventDefault();body.focus();}
+  });
   body.addEventListener('paste',e=>{e.preventDefault();const html=e.clipboardData.getData('text/html');const text=e.clipboardData.getData('text/plain');document.execCommand('insertHTML',false,cleanPastedNote(html,text));onChange();rememberSelection();});
   body.addEventListener('drop',e=>e.preventDefault());
   body.addEventListener('keydown',e=>{
@@ -2771,10 +2887,12 @@ document.addEventListener('click',e=>{
 document.addEventListener('input',e=>{
   const el=e.target,d=el.dataset;
   if(!d.act)return;
-  if(d.act==='note-search'){
+  if(d.act==='note-search'&&!e.isComposing){
     if(window._flushEditor)window._flushEditor();
+    const {selectionStart,selectionEnd}=el;
     ui.noteQuery=el.value;ui.groupPage={};renderNotes();
-    const ni=$('#note-search');if(ni){ni.focus();ni.setSelectionRange(ni.value.length,ni.value.length);}
+    const ni=$('#note-search');
+    if(ni){ni.focus();ni.setSelectionRange(selectionStart,selectionEnd);}
   }
   if(d.act==='todo-search'){
     ui.todoQuery=el.value;ui.groupPage={};renderTodos();
@@ -2812,6 +2930,16 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('keydown',e=>{
   if(e.isComposing)return;
+  if((e.ctrlKey||e.metaKey)&&!e.altKey&&!e.shiftKey&&e.key.toLowerCase()==='k'&&currentRoute()==='notes'&&!document.querySelector('#modalMask.show,#remindLayer.show')){
+    e.preventDefault();
+    if(ui.noteFullscreen)toggleNoteFullscreen(false);
+    if(matchMedia('(max-width:860px)').matches&&ui.editingNote){
+      ui.editingNote=null;
+      renderNotes();
+    }
+    $('#note-search')?.select();
+    return;
+  }
   if(e.key==='Escape'){if(ui.noteFullscreen&&!$('#modalMask').classList.contains('show')){toggleNoteFullscreen(false);$('[data-act="note-fullscreen"]')?.focus();}closeModal();document.querySelectorAll('details.mini-menu[open]').forEach(x=>x.open=false);}
   const el=e.target;
   if(el.dataset&&el.dataset.act==='add-todo-input'&&e.key==='Enter'){
@@ -2997,10 +3125,17 @@ function openNote(id){
   if(currentRoute()!=='notes'){go('notes');}else{renderNotes();}
 }
 function removeNote(id){
+  flushEditor();
   const i=DB.notes.findIndex(n=>n.id===id);if(i<0)return;
-  const [item]=DB.notes.splice(i,1);
-  DB.trash.notes.push({item,deletedAt:Date.now()});
-  ui.editingNote=null;persist();toast('已移入回收站，30 天内可还原');
+  const notes=DB.notes,trash=DB.trash.notes;
+  const [item]=notes.splice(i,1);
+  trash.push({item,deletedAt:Date.now()});
+  if(!persist()){
+    if(DB.notes===notes){notes.splice(i,0,item);trash.pop();}
+    return;
+  }
+  if(ui.editingNote===id)ui.editingNote=null;
+  toast('已移入回收站，30 天内可还原');
   if(currentRoute()==='trash')renderTrash();else renderNotes();
 }
 function restoreItem(kind,id){
